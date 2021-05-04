@@ -109,17 +109,22 @@ public final class PrintSVEvidence extends FeatureWalker<Feature> {
         outputCodecs.add(new BafEvidenceCodec());
         outputCodecs.add(new DepthEvidenceCodec());
         outputCodecs.add(new DiscordantPairEvidenceCodec());
+        outputCodecs.add(new LocusDepthCodec());
         outputCodecs.add(new SplitReadEvidenceCodec());
         outputCodecs.add(new BafEvidenceBCICodec());
         outputCodecs.add(new DepthEvidenceBCICodec());
         outputCodecs.add(new DiscordantPairEvidenceBCICodec());
+        outputCodecs.add(new LocusDepthBCICodec());
         outputCodecs.add(new SplitReadEvidenceBCICodec());
     }
 
     @Override
     protected boolean isAcceptableFeatureType(final Class<? extends Feature> featureType) {
-        return featureType.equals(BafEvidence.class) || featureType.equals(DepthEvidence.class)
-                || featureType.equals(DiscordantPairEvidence.class) || featureType.equals(SplitReadEvidence.class);
+        return featureType.equals(BafEvidence.class) ||
+                featureType.equals(DepthEvidence.class) ||
+                featureType.equals(DiscordantPairEvidence.class) ||
+                featureType.equals(LocusDepth.class) ||
+                featureType.equals(SplitReadEvidence.class);
     }
 
     @Override
@@ -130,6 +135,7 @@ public final class PrintSVEvidence extends FeatureWalker<Feature> {
     @Override
     public void onTraversalStart() {
         super.onTraversalStart();
+        LocusDepthCodec.setDictionary(getBestAvailableSequenceDictionary());
         featureCodec = FeatureManager.getCodecForFile(inputFilePath.toPath());
         evidenceClass = featureCodec.getFeatureType();
         initializeOutput();
@@ -172,6 +178,8 @@ public final class PrintSVEvidence extends FeatureWalker<Feature> {
                 initializeFOStream(new SplitReadEvidenceCodec(), SplitReadEvidenceCodec::encode);
             } else if ( evidenceClass.equals(BafEvidence.class) ) {
                 initializeFOStream(new BafEvidenceCodec(), BafEvidenceCodec::encode);
+            } else if ( evidenceClass.equals(LocusDepth.class) ) {
+                initializeFOStream(new LocusDepthCodec(), LocusDepthCodec::encode);
             } else if ( evidenceClass.equals(DepthEvidence.class) ) {
                 initializeFOStream(new DepthEvidenceCodec(), DepthEvidenceCodec::encode);
                 writeDepthEvidenceHeader();

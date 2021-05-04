@@ -1,39 +1,59 @@
 package org.broadinstitute.hellbender.utils.codecs;
 
-import org.broadinstitute.hellbender.exceptions.UserException;
-import org.broadinstitute.hellbender.tools.sv.BafEvidence;
-import org.broadinstitute.hellbender.tools.walkers.sv.PairedEndAndSplitReadEvidenceCollection.LocusDepth;
-import org.broadinstitute.hellbender.utils.io.BlockCompressedIntervalStream.Reader;
-import org.broadinstitute.hellbender.utils.io.BlockCompressedIntervalStream.Writer;
+import com.google.common.base.Splitter;
+import htsjdk.samtools.SAMSequenceDictionary;
+import htsjdk.samtools.util.IOUtil;
+import htsjdk.tribble.AsciiFeatureCodec;
+import htsjdk.tribble.index.tabix.TabixFormat;
+import htsjdk.tribble.readers.LineIterator;
+import org.broadinstitute.hellbender.tools.sv.LocusDepth;
+import org.broadinstitute.hellbender.utils.Nucleotide;
 
-import java.io.IOException;
+import java.util.List;
 
-public class LocusDepthCodec extends AbstractBCICodec<LocusDepth> {
-    private boolean versionChecked = false;
-    private static final String LD_BCI_FILE_EXTENSION = ".ld.bci";
+public class LocusDepthCodec extends AsciiFeatureCodec<LocusDepth> {
+    private static SAMSequenceDictionary dict;
+    private static final String FORMAT_SUFFIX = ".ld.txt";
+    private static final Splitter splitter = Splitter.on("\t");
 
-    @Override
-    public LocusDepth decode( final Reader<LocusDepth> reader ) throws IOException {
-        if ( !versionChecked ) {
-            if ( !LocusDepth.BCI_VERSION.equals(reader.getVersion()) ) {
-                throw new UserException("bci file has wrong version: expected " +
-                        LocusDepth.BCI_VERSION + " but found " + reader.getVersion());
-            }
-            versionChecked = true;
+    public LocusDepthCodec() {
+        super(LocusDepth.class);
+    }
+
+    public static void setDictionary( final SAMSequenceDictionary dict ) {
+        LocusDepthCodec.dict = dict;
+    }
+
+    @Override public TabixFormat getTabixFormat() {
+        return new TabixFormat(TabixFormat.ZERO_BASED, 1, 2, 0, '#', 0);
+    }
+
+    @Override public LocusDepth decode( final String line ) {
+        final List<String> tokens = splitter.splitToList(line);
+        if ( tokens.size() != 6 ) {
+            throw new IllegalArgumentException("Invalid number of columns: " + tokens.size());
         }
-        return new LocusDepth(reader.getDictionary(), reader.getStream());
+        return new LocusDepth(dict, tokens.get(0),
+                Integer.parseUnsignedInt(tokens.get(1)) + 1,
+                Nucleotide.decode(tokens.get(2)).ordinal(),
+                Nucleotide.decode(tokens.get(3)).ordinal(),
+                Integer.parseUnsignedInt(tokens.get(4)),
+                Integer.parseUnsignedInt(tokens.get(5)));
     }
 
-    @Override
-    public Class<LocusDepth> getFeatureType() { return LocusDepth.class; }
+    @Override public Object readActualHeader( LineIterator reader ) { return null; }
 
     @Override
-    public boolean canDecode( final String path ) { return path.endsWith(LD_BCI_FILE_EXTENSION); }
-
-    public void encode( final LocusDepth locusDepth, final Writer<LocusDepth> writer )
-            throws IOException {
-        locusDepth.write(writer.getStream());
+    public boolean canDecode( final String pathArg ) {
+        final String path = pathArg.toLowerCase();
+        final String toDecode =
+                !IOUtil.hasBlockCompressedExtension(path) ? path : path.substring(0, path.lastIndexOf('.'));
+        return toDecode.endsWith(FORMAT_SUFFIX);
     }
 
-    public String getVersion() { return LocusDepth.BCI_VERSION; }
+    public static String encode( final LocusDepth locusDepth ) {
+        return locusDepth.getContig() + "\t" + (locusDepth.getStart() - 1) + "\t" +
+                locusDepth.getRefCall() + "\t" + locusDepth.getAltCall() + "\t" +
+                locusDepth.getTotalDepth() + "\t" + locusDepth.getAltDepth();
+    }
 }

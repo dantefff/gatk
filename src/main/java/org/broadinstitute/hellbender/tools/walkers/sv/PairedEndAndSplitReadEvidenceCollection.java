@@ -5,9 +5,6 @@ import htsjdk.samtools.CigarElement;
 import htsjdk.samtools.CigarOperator;
 import htsjdk.samtools.SAMSequenceDictionary;
 import htsjdk.samtools.SAMSequenceRecord;
-import htsjdk.samtools.util.BlockCompressedOutputStream;
-import htsjdk.samtools.util.Locatable;
-import htsjdk.tribble.Feature;
 import htsjdk.variant.variantcontext.VariantContext;
 import org.broadinstitute.barclay.argparser.Argument;
 import org.broadinstitute.barclay.argparser.BetaFeature;
@@ -16,16 +13,20 @@ import org.broadinstitute.hellbender.cmdline.programgroups.StructuralVariantDisc
 import org.broadinstitute.hellbender.engine.*;
 import org.broadinstitute.hellbender.engine.filters.ReadFilter;
 import org.broadinstitute.hellbender.engine.filters.ReadFilterLibrary;
-import org.broadinstitute.hellbender.exceptions.GATKException;
 import org.broadinstitute.hellbender.exceptions.UserException;
+import org.broadinstitute.hellbender.tools.sv.DiscordantPairEvidence;
+import org.broadinstitute.hellbender.tools.sv.LocusDepth;
+import org.broadinstitute.hellbender.tools.sv.SplitReadEvidence;
 import org.broadinstitute.hellbender.utils.CollatingInterval;
 import org.broadinstitute.hellbender.utils.Nucleotide;
-import org.broadinstitute.hellbender.utils.codecs.LocusDepthCodec;
+import org.broadinstitute.hellbender.utils.codecs.DiscordantPairEvidenceCodec;
+import org.broadinstitute.hellbender.utils.codecs.LocusDepthBCICodec;
+import org.broadinstitute.hellbender.utils.codecs.SplitReadEvidenceCodec;
 import org.broadinstitute.hellbender.utils.io.BlockCompressedIntervalStream.Header;
 import org.broadinstitute.hellbender.utils.io.BlockCompressedIntervalStream.Writer;
+import org.broadinstitute.hellbender.utils.io.FeatureOutputStream;
 import org.broadinstitute.hellbender.utils.read.GATKRead;
 
-import java.io.*;
 import java.util.*;
 import java.util.function.Predicate;
 
@@ -81,12 +82,13 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
     public static final String ALLELE_COUNT_INPUT_ARGUMENT_SHORT_NAME = "F";
     public static final String ALLELE_COUNT_INPUT_ARGUMENT_LONG_NAME = "allele-count-vcf";
     public static final String SAMPLE_NAME_ARGUMENT_LONG_NAME = "sample-name";
+    public static final String COMPRESSION_LEVEL_ARGUMENT_LONG_NAME = "compression-level";
 
     @Argument(shortName = PAIRED_END_FILE_ARGUMENT_SHORT_NAME, fullName = PAIRED_END_FILE_ARGUMENT_LONG_NAME, doc = "Output file for paired end evidence", optional=false)
-    public String peFile;
+    public GATKPath peFile;
 
     @Argument(shortName = SPLIT_READ_FILE_ARGUMENT_SHORT_NAME, fullName = SPLIT_READ_FILE_ARGUMENT_LONG_NAME, doc = "Output file for split read evidence", optional=false)
-    public String srFile;
+    public GATKPath srFile;
 
     @Argument(shortName = ALLELE_COUNT_OUTPUT_ARGUMENT_SHORT_NAME,
             fullName = ALLELE_COUNT_OUTPUT_ARGUMENT_LONG_NAME,
@@ -113,6 +115,9 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
     @Argument(fullName = SAMPLE_NAME_ARGUMENT_LONG_NAME, doc = "Sample name")
     String sampleName = null;
 
+    @Argument(fullName = COMPRESSION_LEVEL_ARGUMENT_LONG_NAME, doc = "Output compression level")
+    int compressionLevel = 4;
+
     final Set<String> observedDiscordantNames = new HashSet<>();
     final PriorityQueue<SplitPos> splitPosBuffer = new PriorityQueue<>(new SplitPosComparator());
     final List<DiscordantRead> discordantPairs = new ArrayList<>();
@@ -120,8 +125,8 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
     int currentDiscordantPosition = -1;
     String currentChrom = null;
 
-    private BufferedWriter peWriter;
-    private BufferedWriter srWriter;
+    private FeatureOutputStream<DiscordantPairEvidence> peWriter;
+    private FeatureOutputStream<SplitReadEvidence> srWriter;
     private AlleleCounter alleleCounter;
 
     private SAMSequenceDictionary sequenceDictionary;
@@ -136,10 +141,11 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
     public void onTraversalStart() {
         super.onTraversalStart();
 
-        peWriter = createOutputFile(peFile);
-        srWriter = createOutputFile(srFile);
-
         sequenceDictionary = getBestAvailableSequenceDictionary();
+        peWriter = new FeatureOutputStream<>(peFile, new DiscordantPairEvidenceCodec(),
+                DiscordantPairEvidenceCodec::encode, sequenceDictionary, compressionLevel);
+        srWriter = new FeatureOutputStream<>(srFile, new SplitReadEvidenceCodec(),
+                SplitReadEvidenceCodec::encode, sequenceDictionary, compressionLevel);
         if ( alleleCountInputFilename != null && alleleCountOutputFilename != null ) {
             alleleCounter = new AlleleCounter(sequenceDictionary,
                                                 alleleCountInputFilename, alleleCountOutputFilename,
@@ -172,16 +178,6 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
         if ( alleleCounter != null ) {
             alleleCounter.apply(read);
         }
-    }
-
-    private static BufferedWriter createOutputFile( final String fileName ) {
-        final GATKPath path = new GATKPath(fileName);
-        if ( fileName.endsWith(".gz") ) {
-            return new BufferedWriter(
-                    new OutputStreamWriter(
-                            new BlockCompressedOutputStream(path.getOutputStream(), path.toPath(), 6)));
-        }
-        return new BufferedWriter(new OutputStreamWriter(path.getOutputStream()));
     }
 
     private void reportDiscordantReadPair(final GATKRead read) {
@@ -229,15 +225,9 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
     }
 
     private void writeDiscordantPair(final DiscordantRead r) {
-        final String strandA = r.isReadReverseStrand() ? "-" : "+";
-        final String strandB = r.isMateReverseStrand() ? "-" : "+";
-
-        try {
-            // subtract 1 from positions to match pysam output
-            peWriter.write(r.getContig() + "\t" + (r.getStart() - 1) + "\t" + strandA + "\t" + r.getMateContig() + "\t" + (r.getMateStart() - 1) + "\t" + strandB + "\t" + sampleName + "\n");
-        } catch (IOException e) {
-            throw new GATKException("Could not write to PE file", e);
-        }
+        peWriter.add(new DiscordantPairEvidence(sampleName,
+                            r.getContig(), r.getStart(), !r.isReadReverseStrand(),
+                            r.getMateContig(), r.getMateStart(), !r.isMateReverseStrand()));
     }
 
     /**
@@ -245,7 +235,7 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
      * srWriter if necessary.
      */
     @VisibleForTesting
-    public void countSplitRead(final GATKRead read, final PriorityQueue<SplitPos> splitCounts, final BufferedWriter srWriter) {
+    public void countSplitRead(final GATKRead read, final PriorityQueue<SplitPos> splitCounts, final FeatureOutputStream<SplitReadEvidence> srWriter) {
         final SplitPos splitPosition = getSplitPosition(read);
         final int readStart = read.getStart();
         if (splitPosition.direction == POSITION.MIDDLE) {
@@ -263,7 +253,7 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
         splitCounts.add(splitPosition);
     }
 
-    private void flushSplitCounts(final Predicate<SplitPos> flushablePosition, final BufferedWriter srWriter, final PriorityQueue<SplitPos> splitCounts) {
+    private void flushSplitCounts(final Predicate<SplitPos> flushablePosition, final FeatureOutputStream<SplitReadEvidence> srWriter, final PriorityQueue<SplitPos> splitCounts) {
 
         while (splitCounts.size() > 0 && flushablePosition.test(splitCounts.peek())) {
             SplitPos pos = splitCounts.poll();
@@ -272,11 +262,8 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
                 countAtPos++;
                 splitCounts.poll();
             }
-            try {
-                srWriter.write(currentChrom + "\t" + (pos.pos - 1) + "\t" + pos.direction.getDescription() + "\t" + countAtPos + "\t" + sampleName + "\n");
-            } catch (IOException e) {
-                throw new GATKException("Could not write to sr file", e);
-            }
+            final SplitReadEvidence splitRead = new SplitReadEvidence(sampleName, currentChrom, pos.pos, countAtPos, pos.direction.equals(POSITION.RIGHT));
+            srWriter.add(splitRead);
         }
     }
 
@@ -311,11 +298,11 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
     @Override
     public void closeTool() {
         super.closeTool();
-        try {
+        if ( peWriter != null ) {
             peWriter.close();
+        }
+        if ( srWriter != null ) {
             srWriter.close();
-        } catch (IOException e) {
-            throw new GATKException("error closing output file", e);
         }
     }
 
@@ -516,7 +503,7 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
             final Header header =
                     new Header(LocusDepth.class.getSimpleName(), LocusDepth.BCI_VERSION,
                                 dict, Collections.emptyList());
-            final LocusDepthCodec codec = new LocusDepthCodec();
+            final LocusDepthBCICodec codec = new LocusDepthBCICodec();
             this.writer = new Writer<>(new GATKPath(outputFilename), header, codec::encode);
             this.minMapQ = minMapQ;
             this.minQ = minQ;
@@ -640,70 +627,4 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
         }
     }
 
-    @VisibleForTesting
-    public final static class LocusDepth implements Feature {
-        private final SAMSequenceRecord contig;
-        private final int position;
-        private final int refIdx;
-        private final int altIdx;
-        private int totalDepth;
-        private int altDepth;
-        public final static String BCI_VERSION = "1.0";
-
-        public LocusDepth( final SAMSequenceDictionary dict, final Locatable loc,
-                           final int refIdx, final int altIdx ) {
-            this(dict, loc.getContig(), loc.getStart(), refIdx, altIdx, 0, 0);
-        }
-
-        public LocusDepth( final SAMSequenceDictionary dict,
-                           final String contigName, final int position,
-                           final int refIdx, final int altIdx,
-                           final int totalDepth, final int altDepth ) {
-            this.contig = dict.getSequence(contigName);
-            this.position = position;
-            this.refIdx = refIdx;
-            this.altIdx = altIdx;
-            this.totalDepth = totalDepth;
-            this.altDepth = altDepth;
-        }
-
-        public LocusDepth( final SAMSequenceDictionary dict,
-                           final DataInputStream dis ) throws IOException {
-            contig = dict.getSequence(dis.readInt());
-            position = dis.readInt();
-            refIdx = dis.readByte();
-            altIdx = dis.readByte();
-            totalDepth = dis.readInt();
-            altDepth = dis.readInt();
-        }
-
-        public void observe( final int idx ) {
-            if ( idx == altIdx ) altDepth += 1;
-            totalDepth += 1;
-        }
-
-        public SAMSequenceRecord getSequenceRecord() { return contig; }
-        @Override public String getContig() { return contig.getSequenceName(); }
-        @Override public int getEnd() { return position; }
-        @Override public int getStart() { return position; }
-
-        public int getRefIdx() { return refIdx; }
-        public int getAltIdx() { return altIdx; }
-        public int getAltDepth() { return altDepth; }
-        public int getTotalDepth() { return totalDepth; }
-
-        public void write( final DataOutputStream dos ) throws IOException {
-            dos.writeInt(contig.getSequenceIndex());
-            dos.writeInt(position);
-            dos.writeByte(refIdx);
-            dos.writeByte(altIdx);
-            dos.writeInt(totalDepth);
-            dos.writeInt(altDepth);
-        }
-
-        public String toString() {
-            return getContig() + "\t" + getStart() + "\t" + "ACGT".charAt(refIdx) + "\t" +
-                    "ACGT".charAt(altIdx) + "\t" + totalDepth + "\t" + altDepth;
-        }
-    }
 }
