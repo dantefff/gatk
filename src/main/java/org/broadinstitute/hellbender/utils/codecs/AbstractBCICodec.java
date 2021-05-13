@@ -11,37 +11,32 @@ import org.broadinstitute.hellbender.utils.io.BlockCompressedIntervalStream.Writ
 import java.io.IOException;
 import java.io.InputStream;
 
-import static htsjdk.tribble.FeatureCodecHeader.EMPTY_HEADER;
-
-public abstract class AbstractBCICodec <T extends Feature> implements FeatureCodec<T, Reader<T>> {
+public abstract class AbstractBCICodec<F extends Feature>
+        implements FeatureOutputCodec<F, Writer<F>>, FeatureCodec<F, Reader<F>> {
 
     @Override
-    public Feature decodeLoc( final Reader<T> reader ) throws IOException {
+    public Feature decodeLoc( final Reader<F> reader ) throws IOException {
         return decode(reader);
     }
 
     @Override
-    public FeatureCodecHeader readHeader( final Reader<T> reader ) throws IOException {
-        return EMPTY_HEADER;
+    public FeatureCodecHeader readHeader( final Reader<F> reader ) throws IOException {
+        return reader.getFeatureCodecHeader();
     }
 
     @Override
-    public Reader<T> makeSourceFromStream( final InputStream is ) {
-        throw new GATKException("wasn't expecting to execute this code path");
+    public Reader<F> makeSourceFromStream( final InputStream is ) {
+        throw new GATKException("unimplemented method");
     }
 
     @Override
     public LocationAware makeIndexableSourceFromStream( final InputStream is ) {
-        throw new GATKException("wasn't expecting to execute this code path");
+        throw new GATKException("unimplemented method");
     }
 
     @Override
-    public boolean isDone( final Reader<T> reader ) { return !reader.hasNext(); }
+    public boolean isDone( final Reader<F> reader ) { return !reader.hasNext(); }
 
     @Override
-    public void close( final Reader<T> reader ) { reader.close(); }
-
-    abstract public void encode( T feature, Writer<T> writer ) throws IOException;
-
-    abstract public String getVersion();
+    public void close( final Reader<F> reader ) { reader.close(); }
 }

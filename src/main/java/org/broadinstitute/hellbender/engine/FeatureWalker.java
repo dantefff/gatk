@@ -49,11 +49,13 @@ public abstract class FeatureWalker<F extends Feature> extends WalkerBase {
         super.onStartup();
     }
 
+    @SuppressWarnings("unchecked")
     private void initializeDrivingFeatures() {
         final GATKPath drivingPath = getDrivingFeaturePath();
         final FeatureCodec<? extends Feature, ?> codec = FeatureManager.getCodecForFile(drivingPath.toPath());
         if (isAcceptableFeatureType(codec.getFeatureType())) {
             drivingFeaturesInput = new FeatureInput<>(drivingPath, "drivingFeatureFile");
+            drivingFeaturesInput.setFeatureCodecClass((Class<FeatureCodec<F, ?>>)codec.getClass());
             features.addToFeatureSources(0, drivingFeaturesInput, codec.getFeatureType(), cloudPrefetchBuffer, cloudIndexPrefetchBuffer,
                                          referenceArguments.getReferencePath());
             header = getHeaderForFeatures(drivingFeaturesInput);

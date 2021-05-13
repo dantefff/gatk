@@ -1,17 +1,21 @@
 package org.broadinstitute.hellbender.utils.codecs;
 
 import com.google.common.base.Splitter;
+import htsjdk.samtools.SAMSequenceDictionary;
 import htsjdk.samtools.util.IOUtil;
 import htsjdk.tribble.AsciiFeatureCodec;
 import htsjdk.tribble.index.tabix.TabixFormat;
 import htsjdk.tribble.readers.LineIterator;
+import org.broadinstitute.hellbender.engine.GATKPath;
 import org.broadinstitute.hellbender.exceptions.UserException;
 import org.broadinstitute.hellbender.tools.sv.DepthEvidence;
+import org.broadinstitute.hellbender.utils.io.FeatureOutputStream;
 
 import java.util.ArrayList;
 import java.util.List;
 
-public class DepthEvidenceCodec extends AsciiFeatureCodec<DepthEvidence> {
+public class DepthEvidenceCodec extends AsciiFeatureCodec<DepthEvidence>
+        implements FeatureOutputCodec<DepthEvidence, FeatureOutputStream<DepthEvidence>> {
 
     public static final String FORMAT_SUFFIX = ".rd.txt";
     public static final String COL_DELIMITER = "\t";
@@ -48,13 +52,11 @@ public class DepthEvidenceCodec extends AsciiFeatureCodec<DepthEvidence> {
 
     @Override
     public boolean canDecode(final String path) {
-        final String toDecode;
-        if (IOUtil.hasBlockCompressedExtension(path)) {
-            toDecode = path.substring(0, path.lastIndexOf("."));
-        } else {
-            toDecode = path;
+        String toDecode = path.toLowerCase();
+        if ( IOUtil.hasBlockCompressedExtension(toDecode) ) {
+            toDecode = toDecode.substring(0, toDecode.lastIndexOf('.'));
         }
-        return toDecode.toLowerCase().endsWith(FORMAT_SUFFIX);
+        return toDecode.endsWith(FORMAT_SUFFIX);
     }
 
     @Override
@@ -65,6 +67,30 @@ public class DepthEvidenceCodec extends AsciiFeatureCodec<DepthEvidence> {
         return reader.next();
     }
 
+    @Override
+    public FeatureOutputStream<DepthEvidence> makeSink( final GATKPath path,
+                                                        final SAMSequenceDictionary dict,
+                                                        final List<String> sampleNames,
+                                                        final int compressionLevel ) {
+        final FeatureOutputStream<DepthEvidence> foStream =
+                new FeatureOutputStream<>(path,
+                                        getTabixFormat(),
+                                        DepthEvidenceCodec::encode,
+                                        dict,
+                                        compressionLevel);
+        final StringBuilder sb = new StringBuilder("#Chr\tStart\tEnd");
+        for ( final String sampleName : sampleNames ) {
+            sb.append('\t').append(sampleName);
+        }
+        foStream.writeHeader(sb.toString());
+        return foStream;
+    }
+
+    @Override
+    public void encode( final DepthEvidence ev, final FeatureOutputStream<DepthEvidence> os ) {
+        os.write(ev);
+    }
+
     public static String encode(final DepthEvidence ev) {
         final int[] counts = ev.getCounts();
         final int numCounts = counts.length;
@@ -72,8 +98,8 @@ public class DepthEvidenceCodec extends AsciiFeatureCodec<DepthEvidence> {
         columns.add(ev.getContig());
         columns.add(Integer.toString(ev.getStart() - 1));
         columns.add(Integer.toString(ev.getEnd()));
-        for (int i = 0; i < numCounts; i++) {
-            columns.add(Integer.toString(counts[i]));
+        for ( final int count : counts ) {
+            columns.add(Integer.toString(count));
         }
         return String.join(COL_DELIMITER, columns);
     }

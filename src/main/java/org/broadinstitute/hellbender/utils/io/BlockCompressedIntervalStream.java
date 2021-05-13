@@ -9,15 +9,14 @@ import htsjdk.samtools.seekablestream.SeekableStreamFactory;
 import htsjdk.samtools.util.BlockCompressedInputStream;
 import htsjdk.samtools.util.BlockCompressedOutputStream;
 import htsjdk.samtools.util.BlockCompressedStreamConstants;
-import htsjdk.tribble.CloseableTribbleIterator;
-import htsjdk.tribble.Feature;
-import htsjdk.tribble.FeatureCodec;
-import htsjdk.tribble.FeatureReader;
+import htsjdk.tribble.*;
 import org.broadinstitute.hellbender.engine.FeatureInput;
 import org.broadinstitute.hellbender.engine.GATKPath;
 import org.broadinstitute.hellbender.exceptions.GATKException;
 import org.broadinstitute.hellbender.exceptions.UserException;
 import org.broadinstitute.hellbender.utils.CollatingInterval;
+import org.broadinstitute.hellbender.utils.codecs.FeatureSink;
+import org.broadinstitute.hellbender.utils.codecs.FeaturesHeader;
 import org.broadinstitute.hellbender.utils.collections.IntervalTree;
 
 import java.io.DataInputStream;
@@ -88,38 +87,19 @@ public class BlockCompressedIntervalStream {
     }
 
     @FunctionalInterface
-    public interface WriteFunc<T extends Feature> {
-        void write( T tee, Writer<T> writer ) throws IOException;
-    }
-
-    public static class Header {
-        private final String className;
-        private final String version;
-        private final SAMSequenceDictionary dictionary;
-        private final List<String> sampleNames;
-
-        public Header( final String className, final String version,
-                       final SAMSequenceDictionary dictionary, final List<String> sampleNames ) {
-            this.className = className;
-            this.version = version;
-            this.dictionary = dictionary;
-            this.sampleNames = sampleNames;
-        }
-        public String getClassName() { return className; }
-        public String getVersion() { return version; }
-        public SAMSequenceDictionary getDictionary() { return dictionary; }
-        public List<String> getSampleNames() { return sampleNames; }
+    public interface WriteFunc<F extends Feature> {
+        void write( F feature, Writer<F> writer ) throws IOException;
     }
 
     // a class for writing arbitrary objects to a block compressed stream with a self-contained index
     // the only restriction is that you must supply a lambda that writes enough state to a DataOutputStream
     //   to allow you to reconstitute the object when you read it back in later AND you have to
     //   return an CollatingInterval so that we can do indexing.
-    public static class Writer <T extends Feature> {
+    public static class Writer <F extends Feature> implements FeatureSink<F> {
         final String path;
         final SAMSequenceDictionary dict;
         final Map<String, Integer> sampleMap;
-        final WriteFunc<T> writeFunc;
+        final WriteFunc<F> writeFunc;
         final OutputStream os;
         final BlockCompressedOutputStream bcos;
         final DataOutputStream dos;
@@ -134,14 +114,14 @@ public class BlockCompressedIntervalStream {
         public final static int DEFAULT_COMPRESSION_LEVEL = 6;
 
         public Writer( final GATKPath path,
-                       final Header header,
-                       final WriteFunc<T> writeFunc ) {
+                       final FeaturesHeader header,
+                       final WriteFunc<F> writeFunc ) {
             this(path, header, writeFunc, DEFAULT_COMPRESSION_LEVEL);
         }
 
         public Writer( final GATKPath path,
-                       final Header header,
-                       final WriteFunc<T> writeFunc,
+                       final FeaturesHeader header,
+                       final WriteFunc<F> writeFunc,
                        final int compressionLevel ) {
             this.path = path.toString();
             this.dict = header.getDictionary();
@@ -159,8 +139,8 @@ public class BlockCompressedIntervalStream {
         @VisibleForTesting
         public Writer( final String streamSource,
                 final OutputStream os,
-                final Header header,
-                final WriteFunc<T> writeFunc ) {
+                final FeaturesHeader header,
+                final WriteFunc<F> writeFunc ) {
             this.path = streamSource;
             this.dict = header.getDictionary();
             this.sampleMap = createSampleMap(header.getSampleNames());
@@ -182,7 +162,7 @@ public class BlockCompressedIntervalStream {
             return sampleMap;
         }
 
-        private void writeHeader( final Header header ) {
+        private void writeHeader( final FeaturesHeader header ) {
             try {
                 writeClassAndVersion(header.getClassName(), header.getVersion());
                 writeSamples(header.getSampleNames());
@@ -232,32 +212,33 @@ public class BlockCompressedIntervalStream {
             return contig.getSequenceIndex();
         }
 
-        public void write( final T interval ) {
+        @Override
+        public void write( final F feature ) {
             final long prevFilePosition = bcos.getPosition();
             // write the object
             try {
-                writeFunc.write(interval, this);
+                writeFunc.write(feature, this);
             } catch ( final IOException ioe ) {
                 throw new UserException("can't write to " + path, ioe);
             }
 
             // if this is the first interval we've seen in a block, just capture the block-start data
             if ( firstBlockMember || lastInterval == null ) {
-                startBlock(prevFilePosition, interval);
+                startBlock(prevFilePosition, feature);
                 return;
             }
 
             // if the contig changes emit a new index entry (for the previous contig) and
             //   restart tracking of the block
-            if ( !interval.contigsMatch(lastInterval) ) {
+            if ( !feature.contigsMatch(lastInterval) ) {
                 addIndexEntry();
-                startBlock(prevFilePosition, interval);
+                startBlock(prevFilePosition, feature);
                 return;
             }
 
             // extend the tracked interval, as necessary
-            blockEnd = Math.max(blockEnd, interval.getEnd());
-            lastInterval = interval;
+            blockEnd = Math.max(blockEnd, feature.getEnd());
+            lastInterval = feature;
 
             // if writing this element caused a new block to be compressed and added to the file
             if ( isNewBlock(prevFilePosition, bcos.getPosition()) ) {
@@ -266,6 +247,7 @@ public class BlockCompressedIntervalStream {
             }
         }
 
+        @Override
         public void close() {
             // take care of any pending index entry, if necessary
             if ( !firstBlockMember ) {
@@ -300,7 +282,7 @@ public class BlockCompressedIntervalStream {
             }
         }
 
-        private void startBlock( final long filePosition, final T interval ) {
+        private void startBlock( final long filePosition, final Feature interval ) {
             blockFilePosition = filePosition;
             lastInterval = interval;
             blockContig = interval.getContig();
@@ -325,7 +307,7 @@ public class BlockCompressedIntervalStream {
         final long indexFilePointer;
         final BlockCompressedInputStream bcis;
         final DataInputStream dis;
-        final Header header;
+        final FeaturesHeader header;
         final long dataFilePointer;
         IntervalTree<Long> index;
         boolean usedByIterator;
@@ -386,6 +368,9 @@ public class BlockCompressedIntervalStream {
             this.usedByIterator = false;
         }
 
+        public FeatureCodecHeader getFeatureCodecHeader() {
+            return new FeatureCodecHeader(header, dataFilePointer);
+        }
         public DataInputStream getStream() { return dis; }
         public List<String> getSampleNames() { return header.getSampleNames(); }
         public SAMSequenceDictionary getDictionary() { return header.getDictionary(); }
@@ -482,13 +467,13 @@ public class BlockCompressedIntervalStream {
             return indexFilePointer;
         }
 
-        private Header readHeader() {
+        private FeaturesHeader readHeader() {
             try {
                 final String className = dis.readUTF();
                 final String version = dis.readUTF();
                 final List<String> sampleNames = readSampleNames(dis);
                 final SAMSequenceDictionary dictionary = readDictionary(dis);
-                return new Header(className, version, dictionary, sampleNames);
+                return new FeaturesHeader(className, version, dictionary, sampleNames);
             } catch ( final IOException ioe ) {
                 throw new UserException("can't read header from " + path, ioe);
             }

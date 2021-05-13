@@ -1,7 +1,8 @@
 package org.broadinstitute.hellbender.utils.codecs;
 
+import htsjdk.samtools.SAMSequenceDictionary;
+import org.broadinstitute.hellbender.engine.GATKPath;
 import org.broadinstitute.hellbender.exceptions.UserException;
-import org.broadinstitute.hellbender.tools.sv.BafEvidence;
 import org.broadinstitute.hellbender.tools.sv.SplitReadEvidence;
 import org.broadinstitute.hellbender.utils.io.BlockCompressedIntervalStream.Reader;
 import org.broadinstitute.hellbender.utils.io.BlockCompressedIntervalStream.Writer;
@@ -9,6 +10,7 @@ import org.broadinstitute.hellbender.utils.io.BlockCompressedIntervalStream.Writ
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.util.List;
 
 public class SplitReadEvidenceBCICodec extends AbstractBCICodec<SplitReadEvidence> {
     private boolean versionChecked = false;
@@ -36,8 +38,22 @@ public class SplitReadEvidenceBCICodec extends AbstractBCICodec<SplitReadEvidenc
     public Class<SplitReadEvidence> getFeatureType() { return SplitReadEvidence.class; }
 
     @Override
-    public boolean canDecode( final String path ) { return path.endsWith(SR_BCI_FILE_EXTENSION); }
+    public boolean canDecode( final String path ) {
+        return path.toLowerCase().endsWith(SR_BCI_FILE_EXTENSION);
+    }
 
+    @Override
+    public Writer<SplitReadEvidence> makeSink( final GATKPath path,
+                                               final SAMSequenceDictionary dict,
+                                               final List<String> sampleNames,
+                                               final int compressionLevel ) {
+        final String className = SplitReadEvidence.class.getSimpleName();
+        final FeaturesHeader header =
+                new FeaturesHeader(className, SplitReadEvidence.BCI_VERSION, dict, sampleNames);
+        return new Writer<>(path, header, this::encode, compressionLevel);
+    }
+
+    @Override
     public void encode( final SplitReadEvidence srEvidence,
                         final Writer<SplitReadEvidence> writer ) throws IOException {
         final DataOutputStream dos = writer.getStream();
@@ -47,6 +63,4 @@ public class SplitReadEvidenceBCICodec extends AbstractBCICodec<SplitReadEvidenc
         dos.writeInt(srEvidence.getCount());
         dos.writeBoolean(srEvidence.getStrand());
     }
-
-    public String getVersion() { return SplitReadEvidence.BCI_VERSION; }
 }

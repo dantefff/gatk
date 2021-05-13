@@ -6,22 +6,21 @@ import htsjdk.samtools.util.IOUtil;
 import htsjdk.tribble.AsciiFeatureCodec;
 import htsjdk.tribble.index.tabix.TabixFormat;
 import htsjdk.tribble.readers.LineIterator;
+import org.broadinstitute.hellbender.engine.GATKPath;
 import org.broadinstitute.hellbender.tools.sv.LocusDepth;
 import org.broadinstitute.hellbender.utils.Nucleotide;
+import org.broadinstitute.hellbender.utils.io.FeatureOutputStream;
 
 import java.util.List;
 
-public class LocusDepthCodec extends AsciiFeatureCodec<LocusDepth> {
+public class LocusDepthCodec extends AsciiFeatureCodec<LocusDepth>
+        implements FeatureOutputCodec<LocusDepth, FeatureOutputStream<LocusDepth>> {
     private static SAMSequenceDictionary dict;
-    private static final String FORMAT_SUFFIX = ".ld.txt";
+    public static final String FORMAT_SUFFIX = ".ld.txt";
     private static final Splitter splitter = Splitter.on("\t");
 
     public LocusDepthCodec() {
         super(LocusDepth.class);
-    }
-
-    public static void setDictionary( final SAMSequenceDictionary dict ) {
-        LocusDepthCodec.dict = dict;
     }
 
     @Override public TabixFormat getTabixFormat() {
@@ -44,16 +43,38 @@ public class LocusDepthCodec extends AsciiFeatureCodec<LocusDepth> {
     @Override public Object readActualHeader( LineIterator reader ) { return null; }
 
     @Override
-    public boolean canDecode( final String pathArg ) {
-        final String path = pathArg.toLowerCase();
-        final String toDecode =
-                !IOUtil.hasBlockCompressedExtension(path) ? path : path.substring(0, path.lastIndexOf('.'));
+    public boolean canDecode( final String path ) {
+        String toDecode = path.toLowerCase();
+        if ( IOUtil.hasBlockCompressedExtension(toDecode) ) {
+            toDecode = toDecode.substring(0, toDecode.lastIndexOf('.'));
+        }
         return toDecode.endsWith(FORMAT_SUFFIX);
+    }
+
+    @Override
+    public FeatureOutputStream<LocusDepth> makeSink( final GATKPath path,
+                                                     final SAMSequenceDictionary dict,
+                                                     final List<String> sampleNames,
+                                                     final int compressionLevel ) {
+        return new FeatureOutputStream<>(path,
+                getTabixFormat(),
+                LocusDepthCodec::encode,
+                dict,
+                compressionLevel);
+    }
+
+    @Override
+    public void encode( final LocusDepth ev, final FeatureOutputStream<LocusDepth> os ) {
+        os.write(ev);
     }
 
     public static String encode( final LocusDepth locusDepth ) {
         return locusDepth.getContig() + "\t" + (locusDepth.getStart() - 1) + "\t" +
                 locusDepth.getRefCall() + "\t" + locusDepth.getAltCall() + "\t" +
                 locusDepth.getTotalDepth() + "\t" + locusDepth.getAltDepth();
+    }
+
+    public static void setDictionary( final SAMSequenceDictionary dictionary ) {
+        dict = dictionary;
     }
 }

@@ -15,12 +15,11 @@ import org.broadinstitute.hellbender.exceptions.UserException;
 import org.broadinstitute.hellbender.tools.IndexFeatureFile;
 import org.broadinstitute.hellbender.tools.genomicsdb.GenomicsDBConstants;
 import org.broadinstitute.hellbender.tools.genomicsdb.GenomicsDBOptions;
-import org.broadinstitute.hellbender.utils.CollatingInterval;
 import org.broadinstitute.hellbender.utils.IndexUtils;
 import org.broadinstitute.hellbender.utils.SimpleInterval;
 import org.broadinstitute.hellbender.utils.Utils;
+import org.broadinstitute.hellbender.utils.codecs.FeaturesHeader;
 import org.broadinstitute.hellbender.utils.gcs.BucketUtils;
-import org.broadinstitute.hellbender.utils.io.BlockCompressedIntervalStream;
 import org.broadinstitute.hellbender.utils.io.BlockCompressedIntervalStream.Reader;
 import org.broadinstitute.hellbender.utils.io.IOUtils;
 import org.genomicsdb.model.GenomicsDBExportConfiguration;
@@ -29,11 +28,9 @@ import org.genomicsdb.reader.GenomicsDBFeatureReader;
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
-import java.net.URI;
 import java.nio.channels.SeekableByteChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
@@ -324,8 +321,9 @@ public final class FeatureDataSource<T extends Feature> implements GATKDataSourc
                 genomicsDBOptions, setNameOnCodec);
 
         if (IOUtils.isGenomicsDBPath(featureInput) ||
-                featureInput.getFeaturePath().endsWith(BCI_FILE_EXTENSION)) {
+                featureInput.getFeaturePath().toLowerCase().endsWith(BCI_FILE_EXTENSION)) {
             //genomics db uri's have no associated index file to read from, but they do support random access
+            // likewise with block-compressed interval files
             this.hasIndex = false;
             this.supportsRandomAccess = true;
         } else if (featureReader instanceof AbstractFeatureReader) {
@@ -372,7 +370,7 @@ public final class FeatureDataSource<T extends Feature> implements GATKDataSourc
             }
         } else {
             final FeatureCodec<T, ?> codec = getCodecForFeatureInput(featureInput, targetFeatureType, setNameOnCodec);
-            if ( featureInput.getFeaturePath().endsWith(BCI_FILE_EXTENSION) ) {
+            if ( featureInput.getFeaturePath().toLowerCase().endsWith(BCI_FILE_EXTENSION) ) {
                 return new Reader(featureInput, codec);
             }
             return getTribbleFeatureReader(featureInput, codec, cloudWrapper, cloudIndexWrapper);
@@ -469,8 +467,8 @@ public final class FeatureDataSource<T extends Feature> implements GATKDataSourc
     public SAMSequenceDictionary getSequenceDictionary() {
         SAMSequenceDictionary dict = null;
         final Object header = getHeader();
-        if ( header instanceof BlockCompressedIntervalStream.Header ) {
-            dict = ((BlockCompressedIntervalStream.Header)header).getDictionary();
+        if ( header instanceof FeaturesHeader ) {
+            dict = ((FeaturesHeader)header).getDictionary();
         } else if (header instanceof VCFHeader) {
             dict = ((VCFHeader) header).getSequenceDictionary();
         }

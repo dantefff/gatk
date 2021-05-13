@@ -19,10 +19,7 @@ import org.broadinstitute.hellbender.tools.sv.LocusDepth;
 import org.broadinstitute.hellbender.tools.sv.SplitReadEvidence;
 import org.broadinstitute.hellbender.utils.CollatingInterval;
 import org.broadinstitute.hellbender.utils.Nucleotide;
-import org.broadinstitute.hellbender.utils.codecs.DiscordantPairEvidenceCodec;
-import org.broadinstitute.hellbender.utils.codecs.LocusDepthBCICodec;
-import org.broadinstitute.hellbender.utils.codecs.SplitReadEvidenceCodec;
-import org.broadinstitute.hellbender.utils.io.BlockCompressedIntervalStream.Header;
+import org.broadinstitute.hellbender.utils.codecs.*;
 import org.broadinstitute.hellbender.utils.io.BlockCompressedIntervalStream.Writer;
 import org.broadinstitute.hellbender.utils.io.FeatureOutputStream;
 import org.broadinstitute.hellbender.utils.read.GATKRead;
@@ -94,13 +91,13 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
             fullName = ALLELE_COUNT_OUTPUT_ARGUMENT_LONG_NAME,
             doc = "Output file for allele counts",
             optional = true)
-    public String alleleCountOutputFilename;
+    public GATKPath alleleCountOutputFilename;
 
     @Argument(shortName = ALLELE_COUNT_INPUT_ARGUMENT_SHORT_NAME,
             fullName = ALLELE_COUNT_INPUT_ARGUMENT_LONG_NAME,
             doc = "Input VCF of SNPs marking loci for allele counts",
             optional = true)
-    public String alleleCountInputFilename;
+    public GATKPath alleleCountInputFilename;
 
     @Argument(fullName = "allele-count-min-mapq",
             doc = "minimum mapping quality for read to be allele-counted",
@@ -125,8 +122,8 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
     int currentDiscordantPosition = -1;
     String currentChrom = null;
 
-    private FeatureOutputStream<DiscordantPairEvidence> peWriter;
-    private FeatureOutputStream<SplitReadEvidence> srWriter;
+    private FeatureSink<DiscordantPairEvidence> peWriter;
+    private FeatureSink<SplitReadEvidence> srWriter;
     private AlleleCounter alleleCounter;
 
     private SAMSequenceDictionary sequenceDictionary;
@@ -136,18 +133,16 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
         return true;
     }
 
-
     @Override
     public void onTraversalStart() {
         super.onTraversalStart();
 
         sequenceDictionary = getBestAvailableSequenceDictionary();
-        peWriter = new FeatureOutputStream<>(peFile, new DiscordantPairEvidenceCodec(),
-                DiscordantPairEvidenceCodec::encode, sequenceDictionary, compressionLevel);
-        srWriter = new FeatureOutputStream<>(srFile, new SplitReadEvidenceCodec(),
-                SplitReadEvidenceCodec::encode, sequenceDictionary, compressionLevel);
+        final List<String> sampleNames = Collections.singletonList(sampleName);
+        peWriter = createPEWriter();
+        srWriter = createSRWriter();
         if ( alleleCountInputFilename != null && alleleCountOutputFilename != null ) {
-            alleleCounter = new AlleleCounter(sequenceDictionary,
+            alleleCounter = new AlleleCounter(sequenceDictionary, sampleNames, compressionLevel,
                                                 alleleCountInputFilename, alleleCountOutputFilename,
                                                 minMapQ, minQ);
         }
@@ -178,6 +173,34 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
         if ( alleleCounter != null ) {
             alleleCounter.apply(read);
         }
+    }
+
+    private FeatureSink<DiscordantPairEvidence> createPEWriter() {
+        final String peFilename = peFile.toPath().toString();
+        final List<String> sampleNames = Collections.singletonList(sampleName);
+        final DiscordantPairEvidenceCodec peCodec = new DiscordantPairEvidenceCodec();
+        if ( peCodec.canDecode(peFilename) ) {
+            return peCodec.makeSink(peFile, sequenceDictionary, sampleNames, compressionLevel);
+        }
+        final DiscordantPairEvidenceBCICodec peBCICodec = new DiscordantPairEvidenceBCICodec();
+        if ( peBCICodec.canDecode(peFilename) ) {
+            return peBCICodec.makeSink(peFile, sequenceDictionary, sampleNames, compressionLevel);
+        }
+        throw new UserException("no codec knows how to write " + peFilename);
+    }
+
+    private FeatureSink<SplitReadEvidence> createSRWriter() {
+        final String srFilename = srFile.toPath().toString();
+        final List<String> sampleNames = Collections.singletonList(sampleName);
+        final SplitReadEvidenceCodec srCodec = new SplitReadEvidenceCodec();
+        if ( srCodec.canDecode(srFilename) ) {
+            return srCodec.makeSink(srFile, sequenceDictionary, sampleNames, compressionLevel);
+        }
+        final SplitReadEvidenceBCICodec srBCICodec = new SplitReadEvidenceBCICodec();
+        if ( srBCICodec.canDecode(srFilename) ) {
+            return srBCICodec.makeSink(srFile, sequenceDictionary, sampleNames, compressionLevel);
+        }
+        throw new UserException("no codec knows how to write " + srFilename);
     }
 
     private void reportDiscordantReadPair(final GATKRead read) {
@@ -225,7 +248,7 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
     }
 
     private void writeDiscordantPair(final DiscordantRead r) {
-        peWriter.add(new DiscordantPairEvidence(sampleName,
+        peWriter.write(new DiscordantPairEvidence(sampleName,
                             r.getContig(), r.getStart(), !r.isReadReverseStrand(),
                             r.getMateContig(), r.getMateStart(), !r.isMateReverseStrand()));
     }
@@ -235,7 +258,9 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
      * srWriter if necessary.
      */
     @VisibleForTesting
-    public void countSplitRead(final GATKRead read, final PriorityQueue<SplitPos> splitCounts, final FeatureOutputStream<SplitReadEvidence> srWriter) {
+    public void countSplitRead(final GATKRead read,
+                               final PriorityQueue<SplitPos> splitCounts,
+                               final FeatureSink<SplitReadEvidence> srWriter ) {
         final SplitPos splitPosition = getSplitPosition(read);
         final int readStart = read.getStart();
         if (splitPosition.direction == POSITION.MIDDLE) {
@@ -244,16 +269,18 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
         if (currentChrom == null) {
             currentChrom = read.getContig();
         } else if (!currentChrom.equals(read.getContig())) {
-            flushSplitCounts(splitPos -> true, srWriter, splitCounts);
+            flushSplitCounts(splitPos -> true, splitCounts, srWriter);
             currentChrom = read.getContig();
         } else {
-            flushSplitCounts(sp -> (sp.pos < readStart - 1), srWriter, splitCounts);
+            flushSplitCounts(sp -> (sp.pos < readStart - 1), splitCounts, srWriter);
         }
 
         splitCounts.add(splitPosition);
     }
 
-    private void flushSplitCounts(final Predicate<SplitPos> flushablePosition, final FeatureOutputStream<SplitReadEvidence> srWriter, final PriorityQueue<SplitPos> splitCounts) {
+    private void flushSplitCounts(final Predicate<SplitPos> flushablePosition,
+                                  final PriorityQueue<SplitPos> splitCounts,
+                                  final FeatureSink<SplitReadEvidence> srWriter) {
 
         while (splitCounts.size() > 0 && flushablePosition.test(splitCounts.peek())) {
             SplitPos pos = splitCounts.poll();
@@ -263,7 +290,7 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
                 splitCounts.poll();
             }
             final SplitReadEvidence splitRead = new SplitReadEvidence(sampleName, currentChrom, pos.pos, countAtPos, pos.direction.equals(POSITION.RIGHT));
-            srWriter.add(splitRead);
+            srWriter.write(splitRead);
         }
     }
 
@@ -287,7 +314,7 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
 
     @Override
     public Object onTraversalSuccess() {
-        flushSplitCounts(splitPos -> true, srWriter, splitPosBuffer);
+        flushSplitCounts(splitPos -> true, splitPosBuffer, srWriter);
         flushDiscordantReadPairs();
         if ( alleleCounter != null ) {
             alleleCounter.close();
@@ -488,27 +515,34 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
     @VisibleForTesting
     final static class AlleleCounter {
         private final SAMSequenceDictionary dict;
-        private final Writer<LocusDepth> writer;
+        private final FeatureSink<LocusDepth> writer;
         private final int minMapQ;
         private final int minQ;
         private final Iterator<VariantContext> snpSourceItr;
         private final Deque<LocusDepth> locusDepthQueue;
 
         public AlleleCounter( final SAMSequenceDictionary dict,
-                              final String inputFilename,
-                              final String outputFilename,
+                              final List<String> sampleNames,
+                              final int compressionLevel,
+                              final GATKPath inputPath,
+                              final GATKPath outputPath,
                               final int minMapQ,
                               final int minQ ) {
             this.dict = dict;
-            final Header header =
-                    new Header(LocusDepth.class.getSimpleName(), LocusDepth.BCI_VERSION,
-                                dict, Collections.emptyList());
-            final LocusDepthBCICodec codec = new LocusDepthBCICodec();
-            this.writer = new Writer<>(new GATKPath(outputFilename), header, codec::encode);
+            final String outputFilename = outputPath.toPath().toString();
+            final LocusDepthCodec codec = new LocusDepthCodec();
+            final LocusDepthBCICodec bciCodec = new LocusDepthBCICodec();
+            if ( codec.canDecode(outputFilename) ) {
+                this.writer = codec.makeSink(outputPath, dict, sampleNames, compressionLevel);
+            } else if ( bciCodec.canDecode(outputFilename) ) {
+                this.writer = bciCodec.makeSink(outputPath, dict, sampleNames, compressionLevel);
+            } else {
+                throw new UserException("no codec knows how to write " + outputFilename);
+            }
             this.minMapQ = minMapQ;
             this.minQ = minQ;
             final FeatureDataSource<VariantContext> snpSource =
-                    new FeatureDataSource<>(inputFilename);
+                    new FeatureDataSource<>(inputPath.toPath().toString());
             dict.assertSameDictionary(snpSource.getSequenceDictionary());
             this.snpSourceItr = snpSource.iterator();
             this.locusDepthQueue = new ArrayDeque<>(100);
@@ -626,5 +660,4 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
             return true;
         }
     }
-
 }

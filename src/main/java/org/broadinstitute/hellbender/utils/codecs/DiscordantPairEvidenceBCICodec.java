@@ -1,8 +1,8 @@
 package org.broadinstitute.hellbender.utils.codecs;
 
 import htsjdk.samtools.SAMSequenceDictionary;
+import org.broadinstitute.hellbender.engine.GATKPath;
 import org.broadinstitute.hellbender.exceptions.UserException;
-import org.broadinstitute.hellbender.tools.sv.BafEvidence;
 import org.broadinstitute.hellbender.tools.sv.DiscordantPairEvidence;
 import org.broadinstitute.hellbender.utils.io.BlockCompressedIntervalStream.Reader;
 import org.broadinstitute.hellbender.utils.io.BlockCompressedIntervalStream.Writer;
@@ -10,6 +10,7 @@ import org.broadinstitute.hellbender.utils.io.BlockCompressedIntervalStream.Writ
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.util.List;
 
 public class DiscordantPairEvidenceBCICodec extends AbstractBCICodec<DiscordantPairEvidence> {
     private boolean versionChecked = false;
@@ -43,8 +44,22 @@ public class DiscordantPairEvidenceBCICodec extends AbstractBCICodec<DiscordantP
     public Class<DiscordantPairEvidence> getFeatureType() { return DiscordantPairEvidence.class; }
 
     @Override
-    public boolean canDecode( final String path ) { return path.endsWith(PE_BCI_FILE_EXTENSION); }
+    public boolean canDecode( final String path ) {
+        return path.toLowerCase().endsWith(PE_BCI_FILE_EXTENSION);
+    }
 
+    @Override
+    public Writer<DiscordantPairEvidence> makeSink( final GATKPath path,
+                                                    final SAMSequenceDictionary dict,
+                                                    final List<String> sampleNames,
+                                                    final int compressionLevel ) {
+        final String className = DiscordantPairEvidence.class.getSimpleName();
+        final FeaturesHeader header =
+                new FeaturesHeader(className, DiscordantPairEvidence.BCI_VERSION, dict, sampleNames);
+        return new Writer<>(path, header, this::encode, compressionLevel);
+    }
+
+    @Override
     public void encode( final DiscordantPairEvidence peEvidence,
                         final Writer<DiscordantPairEvidence> writer ) throws IOException {
         final DataOutputStream dos = writer.getStream();
@@ -56,6 +71,4 @@ public class DiscordantPairEvidenceBCICodec extends AbstractBCICodec<DiscordantP
         dos.writeInt(peEvidence.getEndPosition());
         dos.writeBoolean(peEvidence.getEndStrand());
     }
-
-    public String getVersion() { return DiscordantPairEvidence.BCI_VERSION; }
 }

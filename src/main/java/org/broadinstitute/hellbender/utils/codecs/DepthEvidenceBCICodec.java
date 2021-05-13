@@ -1,7 +1,8 @@
 package org.broadinstitute.hellbender.utils.codecs;
 
+import htsjdk.samtools.SAMSequenceDictionary;
+import org.broadinstitute.hellbender.engine.GATKPath;
 import org.broadinstitute.hellbender.exceptions.UserException;
-import org.broadinstitute.hellbender.tools.sv.BafEvidence;
 import org.broadinstitute.hellbender.tools.sv.DepthEvidence;
 import org.broadinstitute.hellbender.utils.io.BlockCompressedIntervalStream.Reader;
 import org.broadinstitute.hellbender.utils.io.BlockCompressedIntervalStream.Writer;
@@ -9,6 +10,7 @@ import org.broadinstitute.hellbender.utils.io.BlockCompressedIntervalStream.Writ
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.util.List;
 
 public class DepthEvidenceBCICodec extends AbstractBCICodec<DepthEvidence> {
     private boolean versionChecked = false;
@@ -39,8 +41,23 @@ public class DepthEvidenceBCICodec extends AbstractBCICodec<DepthEvidence> {
     public Class<DepthEvidence> getFeatureType() { return DepthEvidence.class; }
 
     @Override
-    public boolean canDecode( final String path ) { return path.endsWith(RD_BCI_FILE_EXTENSION); }
+    public boolean canDecode( final String path ) {
+        return path.toLowerCase().endsWith(RD_BCI_FILE_EXTENSION);
+    }
 
+    @Override
+    public Writer<DepthEvidence> makeSink( final GATKPath path,
+                                           final SAMSequenceDictionary dict,
+                                           final List<String> sampleNames,
+                                           final int compressionLevel ) {
+        final String className = DepthEvidence.class.getSimpleName();
+        return new Writer<>(path,
+                            new FeaturesHeader(className, DepthEvidence.BCI_VERSION, dict, sampleNames),
+                            this::encode,
+                            compressionLevel);
+    }
+
+    @Override
     public void encode( final DepthEvidence depthEvidence,
                         final Writer<DepthEvidence> writer ) throws IOException {
         final DataOutputStream dos = writer.getStream();
@@ -53,6 +70,4 @@ public class DepthEvidenceBCICodec extends AbstractBCICodec<DepthEvidence> {
             dos.writeInt(count);
         }
     }
-
-    public String getVersion() { return DepthEvidence.BCI_VERSION; }
 }

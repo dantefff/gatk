@@ -1,7 +1,7 @@
 package org.broadinstitute.hellbender.tools.sv;
 
+import htsjdk.samtools.SAMSequenceDictionary;
 import htsjdk.tribble.Feature;
-import htsjdk.tribble.FeatureCodec;
 import org.broadinstitute.barclay.argparser.Argument;
 import org.broadinstitute.barclay.argparser.CommandLineProgramProperties;
 import org.broadinstitute.barclay.argparser.ExperimentalFeature;
@@ -11,14 +11,9 @@ import org.broadinstitute.hellbender.cmdline.programgroups.StructuralVariantDisc
 import org.broadinstitute.hellbender.engine.*;
 import org.broadinstitute.hellbender.exceptions.UserException;
 import org.broadinstitute.hellbender.utils.codecs.*;
-import org.broadinstitute.hellbender.utils.io.BlockCompressedIntervalStream.Header;
-import org.broadinstitute.hellbender.utils.io.BlockCompressedIntervalStream.Writer;
-import org.broadinstitute.hellbender.utils.io.FeatureOutputStream;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
-import java.util.function.Function;
 
 /**
  * Prints SV evidence records. Can be used with -L to retrieve records on a set of intervals. Supports streaming input
@@ -63,7 +58,7 @@ import java.util.function.Function;
 )
 @ExperimentalFeature
 @DocumentedFeature
-public final class PrintSVEvidence extends FeatureWalker<Feature> {
+public final class PrintSVEvidence <F extends Feature> extends FeatureWalker<F> {
 
     public static final String EVIDENCE_FILE_NAME = "evidence-file";
     public static final String COMPRESSION_LEVEL_NAME = "compression-level";
@@ -72,6 +67,7 @@ public final class PrintSVEvidence extends FeatureWalker<Feature> {
             doc = "Input file URI with extension '"
                     + SplitReadEvidenceCodec.FORMAT_SUFFIX + "', '"
                     + DiscordantPairEvidenceCodec.FORMAT_SUFFIX + "', '"
+                    + LocusDepthCodec.FORMAT_SUFFIX + "', '"
                     + BafEvidenceCodec.FORMAT_SUFFIX + "', or '"
                     + DepthEvidenceCodec.FORMAT_SUFFIX + "' (may be gzipped). "
                     + "Can also handle bci rather than txt files.",
@@ -97,14 +93,11 @@ public final class PrintSVEvidence extends FeatureWalker<Feature> {
     @Argument(doc = "List of sample names", fullName = "sample-names", optional = true)
     private List<String> sampleNames = new ArrayList<>();
 
-    @SuppressWarnings("rawtypes")
-    private FeatureOutputStream foStream;
-    @SuppressWarnings("rawtypes")
-    private Writer bciWriter;
-    private FeatureCodec<? extends Feature, ?> featureCodec;
-    private Class<? extends Feature> evidenceClass;
+    private FeatureSink<F> outputSink;
+    private Class<F> evidenceClass;
 
-    private static final List<FeatureCodec<? extends Feature, ?>> outputCodecs = new ArrayList<>(8);
+    private static final List<FeatureOutputCodec<? extends Feature, ? extends FeatureSink<?>>> outputCodecs =
+            new ArrayList<>(10);
     static {
         outputCodecs.add(new BafEvidenceCodec());
         outputCodecs.add(new DepthEvidenceCodec());
@@ -119,12 +112,15 @@ public final class PrintSVEvidence extends FeatureWalker<Feature> {
     }
 
     @Override
-    protected boolean isAcceptableFeatureType(final Class<? extends Feature> featureType) {
-        return featureType.equals(BafEvidence.class) ||
-                featureType.equals(DepthEvidence.class) ||
-                featureType.equals(DiscordantPairEvidence.class) ||
-                featureType.equals(LocusDepth.class) ||
-                featureType.equals(SplitReadEvidence.class);
+    @SuppressWarnings("unchecked")
+    protected boolean isAcceptableFeatureType( final Class<? extends Feature> featureType ) {
+        for ( final FeatureOutputCodec<?, ?> codec : outputCodecs ) {
+            if ( featureType.equals(codec.getFeatureType()) ) {
+                evidenceClass = (Class<F>)featureType;
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override
@@ -136,14 +132,35 @@ public final class PrintSVEvidence extends FeatureWalker<Feature> {
     public void onTraversalStart() {
         super.onTraversalStart();
         LocusDepthCodec.setDictionary(getBestAvailableSequenceDictionary());
-        featureCodec = FeatureManager.getCodecForFile(inputFilePath.toPath());
-        evidenceClass = featureCodec.getFeatureType();
         initializeOutput();
     }
 
-    private static FeatureCodec<? extends Feature, ?> findOutputCodec( final GATKPath outputFilePath ) {
+    @SuppressWarnings("unchecked")
+    private void initializeOutput() {
+        final FeatureOutputCodec<?, ?> outputCodec = findOutputCodec(outputFilePath);
+        final Class<?> outputClass = outputCodec.getFeatureType();
+        if ( !evidenceClass.equals(outputClass) ) {
+            throw new UserException("the input file contains " + evidenceClass.getSimpleName() +
+                    " features, but the output file would be expected to contain " +
+                    outputClass.getSimpleName() + " features");
+        }
+        final SAMSequenceDictionary dict;
+        final List<String> samples;
+        final Object headerObj = getDrivingFeaturesHeader();
+        if ( headerObj instanceof FeaturesHeader ) {
+            final FeaturesHeader header = (FeaturesHeader)headerObj;
+            dict = header.getDictionary();
+            samples = header.getSampleNames();
+        } else {
+            dict = getBestAvailableSequenceDictionary();
+            samples = sampleNames;
+        }
+        outputSink = (FeatureSink<F>)outputCodec.makeSink(outputFilePath, dict, samples, compressionLevel);
+    }
+
+    private static FeatureOutputCodec<?, ?> findOutputCodec( final GATKPath outputFilePath ) {
         final String outputFileName = outputFilePath.toString();
-        for ( final FeatureCodec<? extends Feature, ?> codec : outputCodecs ) {
+        for ( final FeatureOutputCodec<?, ?> codec : outputCodecs ) {
             if ( codec.canDecode(outputFileName) ) {
                 return codec;
             }
@@ -151,89 +168,18 @@ public final class PrintSVEvidence extends FeatureWalker<Feature> {
         throw new UserException("no codec found for path " + outputFileName);
     }
 
-    private void initializeOutput() {
-        final FeatureCodec<? extends Feature, ?> outputCodec = findOutputCodec(outputFilePath);
-        final Class<? extends Feature> outputClass = outputCodec.getFeatureType();
-        if ( evidenceClass != outputClass ) {
-            throw new UserException("input file contains " + evidenceClass.getSimpleName() +
-                    " but output file would be expected to contain " + outputClass.getSimpleName());
-        }
-
-        if ( outputCodec instanceof AbstractBCICodec ) {
-            final AbstractBCICodec<? extends Feature> bciCodec =
-                    (AbstractBCICodec<? extends Feature>)outputCodec;
-            final Object headerObj = getDrivingFeaturesHeader();
-            final Header header;
-            if ( headerObj instanceof Header ) {
-                header = (Header)headerObj;
-            } else {
-                header = new Header(outputClass.getSimpleName(), bciCodec.getVersion(),
-                                   getBestAvailableSequenceDictionary(), sampleNames);
-            }
-            bciWriter = new Writer<>(outputFilePath, header, bciCodec::encode, compressionLevel);
-        } else {
-            if ( evidenceClass.equals(DiscordantPairEvidence.class) ) {
-                initializeFOStream(new DiscordantPairEvidenceCodec(), DiscordantPairEvidenceCodec::encode);
-            } else if ( evidenceClass.equals(SplitReadEvidence.class) ) {
-                initializeFOStream(new SplitReadEvidenceCodec(), SplitReadEvidenceCodec::encode);
-            } else if ( evidenceClass.equals(BafEvidence.class) ) {
-                initializeFOStream(new BafEvidenceCodec(), BafEvidenceCodec::encode);
-            } else if ( evidenceClass.equals(LocusDepth.class) ) {
-                initializeFOStream(new LocusDepthCodec(), LocusDepthCodec::encode);
-            } else if ( evidenceClass.equals(DepthEvidence.class) ) {
-                initializeFOStream(new DepthEvidenceCodec(), DepthEvidenceCodec::encode);
-                writeDepthEvidenceHeader();
-            } else {
-                throw new UserException.BadInput("Unsupported evidence type: " + evidenceClass.getSimpleName());
-            }
-        }
-    }
-
-    private <F extends Feature> void initializeFOStream( final FeatureCodec<F, ?> codec,
-                                                         final Function<F, String> encoder ) {
-        foStream = new FeatureOutputStream<>(outputFilePath, codec, encoder,
-                getBestAvailableSequenceDictionary(), compressionLevel);
-    }
-
-    private void writeDepthEvidenceHeader() {
-        final Object header = getDrivingFeaturesHeader();
-        if ( header instanceof Header ) {
-            final StringBuilder sb = new StringBuilder("#Chr\tStart\tEnd");
-            final Header hdr = (Header)header;
-            for ( final String sampleName : hdr.getSampleNames() ) {
-                sb.append('\t').append(sampleName);
-            }
-            foStream.writeHeader(sb.toString());
-        } else if (header instanceof String) {
-            foStream.writeHeader((String) header);
-        } else {
-            throw new IllegalArgumentException("Expected header object of type String");
-        }
-    }
-
     @Override
-    @SuppressWarnings("unchecked")
-    public void apply(final Feature feature,
+    public void apply(final F feature,
                       final ReadsContext readsContext,
                       final ReferenceContext referenceContext,
                       final FeatureContext featureContext) {
-        if ( foStream != null ) {
-            foStream.add(feature);
-        }
-        if ( bciWriter != null ) {
-            bciWriter.write(feature);
-        }
+        outputSink.write(feature);
     }
 
     @Override
     public Object onTraversalSuccess() {
         super.onTraversalSuccess();
-        if ( foStream != null ) {
-            foStream.close();
-        }
-        if ( bciWriter != null ) {
-            bciWriter.close();
-        }
+        outputSink.close();
         return null;
     }
 }

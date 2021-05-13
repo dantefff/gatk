@@ -88,8 +88,8 @@ public class PairedEndAndSplitReadEvidenceCollectionUnitTest extends GATKBaseTes
     // Workaround for use of generic class with Mockito
     private static class SplitReadFeatureOutputStream extends FeatureOutputStream<SplitReadEvidence> {
         public SplitReadFeatureOutputStream() {
-            super(new GATKPath(""), new SplitReadEvidenceCodec(), SplitReadEvidenceCodec::encode,
-                    new SAMSequenceDictionary(), 4);
+            super(new GATKPath(""), new SplitReadEvidenceCodec().getTabixFormat(),
+                    SplitReadEvidenceCodec::encode, new SAMSequenceDictionary(), 4);
         }
     }
 
@@ -132,9 +132,8 @@ public class PairedEndAndSplitReadEvidenceCollectionUnitTest extends GATKBaseTes
         Assert.assertFalse(counts.containsKey(new SplitPos(1100, POSITION.RIGHT)));
         Assert.assertFalse(counts.containsKey(new SplitPos(1100, POSITION.LEFT)));
         Assert.assertEquals(counts.get(new SplitPos(1600, POSITION.LEFT)).intValue(), 1);
-        Mockito.verify(mockSrWriter).add(new SplitReadEvidence(tool.sampleName, "1", 1100, 1, false));
-        Mockito.verify(mockSrWriter).add(new SplitReadEvidence(tool.sampleName, "1", 1100, 2, true));
+        Mockito.verify(mockSrWriter).write(new SplitReadEvidence(tool.sampleName, "1", 1100, 1, false));
+        Mockito.verify(mockSrWriter).write(new SplitReadEvidence(tool.sampleName, "1", 1100, 2, true));
         Mockito.verifyNoMoreInteractions(mockSrWriter);
     }
-
 }
