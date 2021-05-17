@@ -1,12 +1,13 @@
 package org.broadinstitute.hellbender.engine;
 
+import htsjdk.samtools.SAMSequenceDictionary;
 import htsjdk.tribble.Feature;
 import htsjdk.tribble.FeatureCodec;
 import org.broadinstitute.hellbender.engine.filters.CountingReadFilter;
 import org.broadinstitute.hellbender.exceptions.UserException;
+import org.broadinstitute.hellbender.tools.genomicsdb.GenomicsDBOptions;
 import org.broadinstitute.hellbender.utils.SimpleInterval;
-
-import java.util.Iterator;
+import org.broadinstitute.hellbender.utils.Utils;
 
 /**
  * A FeatureWalker is a tool that processes a {@link Feature} at a time from a source of Features, with
@@ -21,7 +22,7 @@ import java.util.Iterator;
  */
 public abstract class FeatureWalker<F extends Feature> extends WalkerBase {
 
-    private FeatureInput<F> drivingFeaturesInput;
+    private FeatureDataSource<F> drivingFeatures;
     private Object header;
 
     @Override
@@ -47,6 +48,10 @@ public abstract class FeatureWalker<F extends Feature> extends WalkerBase {
     @Override
     protected final void onStartup() {
         super.onStartup();
+        // set the intervals for the feature here, because they are not initialized when initialize features is set
+        if ( hasUserSuppliedIntervals() ) {
+            drivingFeatures.setIntervalsForTraversal(userIntervals);
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -54,11 +59,19 @@ public abstract class FeatureWalker<F extends Feature> extends WalkerBase {
         final GATKPath drivingPath = getDrivingFeaturePath();
         final FeatureCodec<? extends Feature, ?> codec = FeatureManager.getCodecForFile(drivingPath.toPath());
         if (isAcceptableFeatureType(codec.getFeatureType())) {
-            drivingFeaturesInput = new FeatureInput<>(drivingPath, "drivingFeatureFile");
-            drivingFeaturesInput.setFeatureCodecClass((Class<FeatureCodec<F, ?>>)codec.getClass());
-            features.addToFeatureSources(0, drivingFeaturesInput, codec.getFeatureType(), cloudPrefetchBuffer, cloudIndexPrefetchBuffer,
-                                         referenceArguments.getReferencePath());
-            header = getHeaderForFeatures(drivingFeaturesInput);
+            final SAMSequenceDictionary dictionary = getBestAvailableSequenceDictionary();
+            final GenomicsDBOptions options = new GenomicsDBOptions(referenceArguments.getReferencePath());
+            final FeatureInput<F> drivingFeatureInput = new FeatureInput<>(drivingPath);
+            drivingFeatureInput.setFeatureCodecClass((Class<FeatureCodec<F, ?>>)codec.getClass());
+            drivingFeatures = new FeatureDataSource<>(drivingFeatureInput, FeatureDataSource.DEFAULT_QUERY_LOOKAHEAD_BASES, null,
+                    cloudPrefetchBuffer, cloudIndexPrefetchBuffer, options, false, dictionary);
+            header = drivingFeatures.getHeader();
+
+            final FeatureInput<F> featureInput = new FeatureInput<>(drivingPath, "drivingFeatureFile");
+            featureInput.setFeatureCodecClass((Class<FeatureCodec<F, ?>>)codec.getClass());
+            features.addToFeatureSources(featureInput,
+                    new FeatureDataSource<>(drivingFeatureInput, FeatureDataSource.DEFAULT_QUERY_LOOKAHEAD_BASES, null,
+                        cloudPrefetchBuffer, cloudIndexPrefetchBuffer, options, false, dictionary));
         } else {
             throw new UserException("File " + drivingPath.getRawInputString() + " contains features of the wrong type.");
         }
@@ -80,19 +93,16 @@ public abstract class FeatureWalker<F extends Feature> extends WalkerBase {
      */
     @Override
     public void traverse() {
-        final CountingReadFilter readFilter = makeReadFilter();
+        CountingReadFilter readFilter = makeReadFilter();
         // Process each feature in the input stream.
-        final Iterator<F> featureItr =
-                features.getFeatureIterator(drivingFeaturesInput, userIntervals);
-        while ( featureItr.hasNext() ) {
-            final F feature = featureItr.next();
-            final SimpleInterval featureInterval = makeFeatureInterval(feature);
-            apply(feature,
-                  new ReadsContext(reads, featureInterval, readFilter),
-                  new ReferenceContext(reference, featureInterval),
-                  new FeatureContext(features, featureInterval));
-            progressMeter.update(feature);
-        }
+        Utils.stream(drivingFeatures).forEach(feature -> {
+                    final SimpleInterval featureInterval = makeFeatureInterval(feature);
+                    apply(feature,
+                            new ReadsContext(reads, featureInterval, readFilter),
+                            new ReferenceContext(reference, featureInterval),
+                            new FeatureContext(features, featureInterval));
+                    progressMeter.update(feature);
+                });
     }
 
     /**
@@ -135,6 +145,10 @@ public abstract class FeatureWalker<F extends Feature> extends WalkerBase {
     @Override
     protected final void onShutdown() {
         super.onShutdown();
+
+        if ( drivingFeatures != null ) {
+            drivingFeatures.close();
+        }
     }
 
     /**

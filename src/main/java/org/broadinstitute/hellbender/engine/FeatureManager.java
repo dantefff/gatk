@@ -246,6 +246,11 @@ public final class FeatureManager implements AutoCloseable {
         featureSources.put(featureInput, new FeatureDataSource<>(featureInput, featureQueryLookahead, featureType, cloudPrefetchBuffer, cloudIndexPrefetchBuffer, genomicsDBOptions));
     }
 
+    <F extends Feature> void addToFeatureSources (final FeatureInput<F> featureInput,
+                                                  final FeatureDataSource<F> featureDataSource) {
+        featureSources.put(featureInput, featureDataSource);
+    }
+
     /**
      * Given a ArgumentDefinition for an argument known to be of type FeatureInput (or a Collection thereof), retrieves the type
      * parameter for the FeatureInput (eg., for FeatureInput<VariantContext> or List<FeatureInput<VariantContext>>

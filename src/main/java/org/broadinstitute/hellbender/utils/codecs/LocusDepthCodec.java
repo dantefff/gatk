@@ -14,8 +14,8 @@ import org.broadinstitute.hellbender.utils.io.FeatureOutputStream;
 import java.util.List;
 
 public class LocusDepthCodec extends AsciiFeatureCodec<LocusDepth>
-        implements FeatureOutputCodec<LocusDepth, FeatureOutputStream<LocusDepth>> {
-    private static SAMSequenceDictionary dict;
+        implements FeatureOutputCodec<LocusDepth, FeatureOutputStream<LocusDepth>>, NeedsDictionary {
+    private SAMSequenceDictionary dict;
     public static final String FORMAT_SUFFIX = ".ld.txt";
     private static final Splitter splitter = Splitter.on("\t");
 
@@ -74,7 +74,7 @@ public class LocusDepthCodec extends AsciiFeatureCodec<LocusDepth>
                 locusDepth.getTotalDepth() + "\t" + locusDepth.getAltDepth();
     }
 
-    public static void setDictionary( final SAMSequenceDictionary dictionary ) {
+    public void setDictionary( final SAMSequenceDictionary dictionary ) {
         dict = dictionary;
     }
 }

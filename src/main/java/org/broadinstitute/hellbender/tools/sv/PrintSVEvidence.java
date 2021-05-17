@@ -131,7 +131,6 @@ public final class PrintSVEvidence <F extends Feature> extends FeatureWalker<F> 
     @Override
     public void onTraversalStart() {
         super.onTraversalStart();
-        LocusDepthCodec.setDictionary(getBestAvailableSequenceDictionary());
         initializeOutput();
     }
 
