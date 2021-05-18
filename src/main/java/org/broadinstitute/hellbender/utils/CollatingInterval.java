@@ -11,6 +11,17 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.util.function.Supplier;
 
+/**
+ * A CollatingInterval is a Feature (and Locatable) that is built with respect to some dictionary.
+ * Its notion of a contig is represented by a SAMSequenceRecord from that dictionary, rather than
+ * just by a name.
+ * This means that CollatingIntervals are efficiently Comparable, with a natural order specified by
+ * the order of records in the dictionary.  It also means that the getContig method returns a String
+ * that is effectively interned, without the overhead of actually interning, because it returns the
+ * String representing the name of the contig directly from the dictionary.
+ * CollatingIntervals are completely validated:  The contig exists in the dictionary, and the start
+ * and end lie within the contig's length, and are properly ordered.
+ */
 public class CollatingInterval implements Feature, Comparable<CollatingInterval> {
     private final SAMSequenceRecord contig;
     private final int start;
@@ -57,9 +68,7 @@ public class CollatingInterval implements Feature, Comparable<CollatingInterval>
         return contigsMatch(that) && that.getStart() >= start && that.getEnd() <= end;
     }
     @Override public boolean contigsMatch( final Locatable that ) {
-        final String thisContig = contig.getSequenceName();
-        final String thatContig = that.getContig();
-        return thisContig == thatContig || thisContig.equals(thatContig);
+        return contig.getSequenceName().equals(that.getContig());
     }
 
     /**

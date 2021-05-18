@@ -10,23 +10,9 @@ import java.util.Objects;
 /**
  * A Red-Black tree with CollatingIntervals for keys.
  * Intervals are kept in dictionary order, and there are no comparator overrides.
- * Not thread-safe, and cannot be made so.  You must synchronize externally.
- * <p>
- * There's some weird stuff about sentinel values for the put and remove methods.  Here's what's up with that:
- * When you update the value associated with some interval by doing a put with an interval that's already in the
- * tree, the old value is returned to you.  But maybe you've put some nulls into the tree as values.  (That's legal.)
- * In that case, when you get a null value returned by put you can't tell whether the interval was inserted into the tree
- * and there was no old value to return to you or whether you just updated an existing interval that had a null value
- * associated with it.  (Both situations return null.)  IF you're inserting nulls as values, and IF you need to be able
- * to tell whether the put operation did an insert or an update, you can do a special thing so that you can distinguish
- * these cases:  set the sentinel value for the tree to some singleton object that you never ever use as a legitimate
- * value.  Then when you call put you'll get your sentinel value back for an insert, but you'll get null back for an
- * update of a formerly-null value.  Same thing happens for remove:  set the sentinel IF you've used nulls for values,
- * and IF you need to be able to tell the difference between remove not finding the interval and remove removing an
- * interval that has a null value associated with it.
- * If you're not using nulls as values, or if you don't care to disambiguate these cases, then just forget about
- * all this weirdness.  The sentinel value is null by default, so put and remove will behave like you might expect them
- * to if you're not worrying about this stuff:  they'll return null for novel insertions and failed deletions.
+ * There are a number of versions of IntervalTree floating about.  Most of them are built with
+ * respect to a single contig.  This one uses a CollatingInterval as a key, and this extends the
+ * IntervalTree to encompass an entire genome.
  */
 public final class IntervalTree<V> implements Iterable<IntervalTree.Entry<V>> {
     private Node<V> root;

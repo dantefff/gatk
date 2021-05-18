@@ -8,8 +8,10 @@ import org.broadinstitute.hellbender.utils.CollatingInterval;
 import org.broadinstitute.hellbender.utils.IntervalUtils;
 import org.broadinstitute.hellbender.utils.SimpleInterval;
 import org.broadinstitute.hellbender.utils.reference.ReferenceUtils;
+import org.testng.Assert;
 import org.testng.annotations.Test;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -30,18 +32,37 @@ public class IntervalTreeTest extends GATKBaseTest {
             final int start = randIndex(contig.getSequenceLength() - 151) + 1;
             arr.add(new CollatingInterval(contig, start, start + 151));
         }
-        final List<CollatingInterval> testArr1 = new ArrayList<>(arr);
+        double elapsed1 = timeSortingCollatingIntervals(arr);
+        double elapsed2 = timeSortingSimpleIntervals(arr, dict, false);
+        double elapsed3 = timeSortingSimpleIntervals(arr, dict, true);
+        elapsed3 = (elapsed3 + timeSortingSimpleIntervals(arr, dict, true)) / 2;
+        elapsed2 = (elapsed2 + timeSortingSimpleIntervals(arr, dict, false)) / 2;
+        elapsed1 = (elapsed1 + timeSortingCollatingIntervals(arr)) / 2;
+        System.out.println("collating: " + elapsed1 + " secs");
+        System.out.println("interned:  " + elapsed2 + " ratio: " + elapsed2/elapsed1 + "x");
+        System.out.println("novel str: " + elapsed3 + " ratio: " + elapsed3/elapsed1 + "x");
+        Assert.assertTrue(elapsed2 > elapsed1);
+        Assert.assertTrue(elapsed3 > elapsed1);
+    }
+
+    public static double timeSortingCollatingIntervals( final List<CollatingInterval> inputs ) {
+        final List<CollatingInterval> testArr1 = new ArrayList<>(inputs);
         long startTime1 = System.nanoTime();
         testArr1.sort(Comparator.naturalOrder());
-        double elapsed1 = (System.nanoTime() - startTime1)/1000000000.;
+        return (System.nanoTime() - startTime1)/1000000000.;
+    }
 
+    public static double timeSortingSimpleIntervals( final List<CollatingInterval> inputs,
+                                                     final SAMSequenceDictionary dict,
+                                                     final boolean createNovelString ) {
         final List<SimpleInterval> testArr2 = new ArrayList<>(ARRAY_SIZE);
-        arr.forEach(i ->
-                testArr2.add(new SimpleInterval(new String(i.getContig().getBytes()), i.getStart(), i.getEnd())));
+        inputs.forEach(i ->
+                testArr2.add(new SimpleInterval(
+                        createNovelString ? new String(i.getContig().getBytes()) : i.getContig(),
+                        i.getStart(), i.getEnd())));
         long startTime2 = System.nanoTime();
         testArr2.sort(IntervalUtils.getDictionaryOrderComparator(dict));
-        double elapsed2 = (System.nanoTime() - startTime2)/1000000000.;
-        System.out.println("collating: " + elapsed1 + " secs vs. simple: " + elapsed2 + " ratio: " + elapsed2/elapsed1 + "x");
+        return (System.nanoTime() - startTime2)/1000000000.;
     }
 
     public static int randIndex( final int bound ) {
