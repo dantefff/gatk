@@ -110,7 +110,7 @@ public final class ReblockGVCF extends MultiVariantWalker {
 
     @Argument(fullName = StandardArgumentDefinitions.OUTPUT_LONG_NAME, shortName = StandardArgumentDefinitions.OUTPUT_SHORT_NAME,
             doc="File to which variants should be written")
-    private GATKPath outputFile;
+    protected GATKPath outputFile;
 
     @ArgumentCollection
     public GenotypeCalculationArgumentCollection genotypeArgs = new GenotypeCalculationArgumentCollection();
@@ -169,8 +169,10 @@ public final class ReblockGVCF extends MultiVariantWalker {
             GATKVCFConstants.MLE_ALLELE_FREQUENCY_KEY, GATKVCFConstants.EXCESS_HET_KEY, GATKVCFConstants.AS_INBREEDING_COEFFICIENT_KEY,
             GATKVCFConstants.DOWNSAMPLED_KEY);
 
-    private ReblockingGVCFWriter vcfWriter;
     private CachingIndexedFastaSequenceFile referenceReader;
+
+    @VisibleForTesting
+    ReblockingGVCFWriter vcfWriter;
 
     @Override
     public boolean useVariantAnnotations() { return true;}
@@ -224,8 +226,19 @@ public final class ReblockGVCF extends MultiVariantWalker {
             VCFStandardHeaderLines.addStandardInfoLines(headerLines, true, VCFConstants.DBSNP_KEY);
         }
 
-        final VariantContextWriter writer = createVCFWriter(outputFile);
         referenceReader = ReferenceUtils.createReferenceReader(referenceArguments.getReferenceSpecifier());
+
+        createVcfWriter(headerLines);
+
+        if (genotypeArgs.samplePloidy != PLOIDY_TWO) {
+            logger.warn("The -ploidy parameter is ignored in " + getClass().getSimpleName() + " tool as this tool maintains input ploidy for each genotype");
+        }
+    }
+
+    @VisibleForTesting
+    void createVcfWriter(Set<VCFHeaderLine> headerLines) {
+        final VariantContextWriter writer = createVCFWriter(outputFile);
+
         final ReblockingOptions reblockingOptions = new ReblockingOptions(dropLowQuals, allowMissingHomRefData, rgqThreshold);
 
         try {
@@ -234,10 +247,6 @@ public final class ReblockGVCF extends MultiVariantWalker {
             throw new IllegalArgumentException("GQBands are malformed: " + e.getMessage(), e);
         }
         vcfWriter.writeHeader(new VCFHeader(headerLines, getSamplesForVariants()));  //don't get samples from header -- multi-variant inputHeader doens't have sample names
-
-        if (genotypeArgs.samplePloidy != PLOIDY_TWO) {
-            logger.warn("The -ploidy parameter is ignored in " + getClass().getSimpleName() + " tool as this tool maintains input ploidy for each genotype");
-        }
     }
 
     private HaplotypeCallerGenotypingEngine createGenotypingEngine(final SampleList samples) {
@@ -263,12 +272,6 @@ public final class ReblockGVCF extends MultiVariantWalker {
         regenotypeVC(variant);
     }
 
-    @Override
-    public Object onTraversalSuccess() {
-        vcfWriter.close();
-        return null;
-    }
-
     /**
      * Re-genotype (and re-annotate) a VariantContext
      * Note that the GVCF write takes care of the actual homRef block merging based on {@code GVCFGQBands}
@@ -280,7 +283,7 @@ public final class ReblockGVCF extends MultiVariantWalker {
 
         //Pass back ref-conf homRef sites/blocks to be combined by the GVCFWriter
         if (isHomRefBlock(originalVC)) {
-            if (originalVC.getEnd() <= vcfWriter.getVcfOutputEnd()) {
+            if (originalVC.contigsMatch(vcfWriter.getVcfOutputEnd()) && originalVC.getEnd() <= vcfWriter.getVcfOutputEnd().getStart()) {
                 return;
             }
             final Genotype genotype = originalVC.getGenotype(0);
@@ -337,7 +340,7 @@ public final class ReblockGVCF extends MultiVariantWalker {
         //variants with PL[0] less than threshold get turned to homRef with PL=[0,0,0], shouldn't get INFO attributes
         //make sure we can call het variants with GQ >= rgqThreshold in joint calling downstream
         if(shouldBeReblocked(result)) {
-            if (result.getEnd() <= vcfWriter.getVcfOutputEnd()) {
+            if (vcfWriter.getVcfOutputEnd() != null && result.getEnd() <= vcfWriter.getVcfOutputEnd().getEnd()) {
                 return;
             }
             final VariantContextBuilder newHomRefBuilder = lowQualVariantToGQ0HomRef(result);
@@ -482,8 +485,11 @@ public final class ReblockGVCF extends MultiVariantWalker {
 
         final Genotype newG = gb.make();
         builder.alleles(Arrays.asList(newG.getAlleles().get(0), Allele.NON_REF_ALLELE)).genotypes(newG);
-        if (lowQualityVariant.getStart() <= vcfWriter.getVcfOutputEnd()) {
-            final int newStart = vcfWriter.getVcfOutputEnd() + 1;
+        if (vcfWriter.getVcfOutputEnd() != null && lowQualityVariant.getStart() <= vcfWriter.getVcfOutputEnd().getStart()) {
+            final int newStart = vcfWriter.getVcfOutputEnd().getEnd() + 1;
+            if (newStart > lowQualityVariant.getEnd()) {
+                return null;
+            }
             ReblockingGVCFBlockCombiner.moveBuilderStart(builder, newStart, referenceReader);
         }
         return builder.unfiltered()  //genotyping engine will add lowQual filter, so strip it off
@@ -572,14 +578,14 @@ public final class ReblockGVCF extends MultiVariantWalker {
             final GenotypesContext gc = AlleleSubsettingUtils.subsetAlleles(variant.getGenotypes(), PLOIDY_TWO, variant.getAlleles(),
                     newAlleleSetUntrimmed, null, GenotypeAssignmentMethod.USE_PLS_TO_ASSIGN,
                     variant.getAttributeAsInt(VCFConstants.DEPTH_KEY, 0), false);
-            if (!gc.get(0).hasGQ()) {
+            if (gc.get(0).isHomRef() || !gc.get(0).hasGQ() || gc.get(0).getAlleles().contains(Allele.NO_CALL)) {  //could be low quality or no-call after subsetting
                 if (dropLowQuals) {
                     return null;
                 }
-                logger.warn("No GQ returned for genotype at " + variant.getContig() + ":"
-                        + variant.getStart() + " after subsetting -- is this really a high quality genotype? " + gc.get(0).toString());
                 final VariantContextBuilder newHomRefBuilder = lowQualVariantToGQ0HomRef(variant);
-                vcfWriter.add(newHomRefBuilder.make());
+                if (newHomRefBuilder != null) {  //there's a chance the low quality variant may be entirely overlapped by a variant already output
+                    vcfWriter.add(newHomRefBuilder.make());
+                }
                 return null;
             }
             //note that subsetting alleles can increase GQ, e.g. with one confident reference allele and a deletion allele that's either 4 or 5 bases long
@@ -623,7 +629,7 @@ public final class ReblockGVCF extends MultiVariantWalker {
         final int oldLongestAlleleLength = originalVC.getReference().length();
         final int newLongestAlleleLength = newTrimmedAllelesVC.getReference().length();
         final Genotype genotype = originalVC.getGenotype(0);
-        final int vcfOutputEnd = vcfWriter.getVcfOutputEnd();
+        final int vcfOutputEnd = vcfWriter.getVcfOutputEnd() == null ? -1 : vcfWriter.getVcfOutputEnd().getEnd();
         if (newLongestAlleleLength < oldLongestAlleleLength) {
             //need to add a ref block to make up for the allele trimming or there will be a hole in the GVCF
             final int[] originalLikelihoods = getGenotypePosteriorsOtherwiseLikelihoods(genotype, posteriorsKey);
@@ -754,6 +760,13 @@ public final class ReblockGVCF extends MultiVariantWalker {
             if (!foundMatch && !currAlt.isSymbolic()) {
                 allelesToDrop.add(currAlt);
             }
+        }
+        //if the position of variant overlaps the ref block buffer, then it means that its deletion has been converted to a ref block
+        //(if there was a subsequent high quality deletion, it would have trimmed the buffer)
+        if (calledGenotype.getAlleles().contains(Allele.SPAN_DEL) && (vcfWriter.siteOverlapsBuffer(variant)
+                || vcfWriter.getVcfOutputEnd() == null
+                || vcfWriter.getVcfOutputEnd().getEnd() < variant.getStart())) {
+            allelesToDrop.add(Allele.SPAN_DEL);
         }
         return allelesToDrop;
     }

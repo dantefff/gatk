@@ -30,7 +30,7 @@ public class ReblockingGVCFBlockCombiner extends GVCFBlockCombiner implements Pu
     /**
      * fields updated on the fly during GVCFWriter operation
      */
-    private int vcfOutputEnd = -1;
+    private int vcfOutputEnd = 1;
     private int bufferEnd = 0;
     final private boolean dropLowQuals;
     final private boolean allowMissingHomRefData;
@@ -106,19 +106,21 @@ public class ReblockingGVCFBlockCombiner extends GVCFBlockCombiner implements Pu
                 () -> "Input variant context at position " + currentContig + ":" + variantContextToOutput.getStart() + " has negative length: start=" + variantContextToOutput.getStart() + " end=" + variantContextToOutput.getEnd());
 
         if (currentContig == null) {
-            currentContig = variantContextToOutput.getContig(); //variantContexts should have identical start, so choose 0th arbitrarily
+            currentContig = variantContextToOutput.getContig();
         } else if (!variantContextToOutput.getContig().equals(currentContig)) {
             flushRefBlockBuffer();
             currentContig = variantContextToOutput.getContig();
-            vcfOutputEnd = 0;
+            vcfOutputEnd = 1;  //must be one to be a valid SimpleInterval
         }
         final VariantContextBuilder newHomRefBlock = new VariantContextBuilder(variantContextToOutput);
 
-        if (variantContextToOutput.getStart() <= vcfOutputEnd) {
-            if (variantContextToOutput.getEnd() <= vcfOutputEnd) {
-                return;
+        if (isHomRef(variantContextToOutput.getGenotype(0))) {
+            if (variantContextToOutput.getStart() <= vcfOutputEnd) {
+                if (variantContextToOutput.getEnd() <= vcfOutputEnd) {
+                    return;
+                }
+                moveBuilderStart(newHomRefBlock, vcfOutputEnd + 1, referenceReader);
             }
-            moveBuilderStart(newHomRefBlock, vcfOutputEnd + 1, referenceReader);
         }
 
         final List<VariantContextBuilder> completedBlocks = new ArrayList<>();
@@ -133,9 +135,14 @@ public class ReblockingGVCFBlockCombiner extends GVCFBlockCombiner implements Pu
                 if ((!g.isHomRef() || (g.hasPL() && g.getPL()[0] != 0))) {
                     //toOutput.add(variantContextToOutput);
                     super.submit(variantContextToOutput);
-                    vcfOutputEnd = variantEnd;
+                    vcfOutputEnd = Math.max(vcfOutputEnd, variantEnd);
+                } else {
+                    homRefBlockBuffer.add(newHomRefBlock);
                 }
-                break;
+                homRefBlockBuffer.removeAll(completedBlocks);
+                homRefBlockBuffer.addAll(tailBuffer);
+                homRefBlockBuffer.sort(VCB_COMPARATOR);
+                return;
             }
             int blockEnd = (int)builder.getStop();
             final int variantStart = variantContextToOutput.getStart();
@@ -149,22 +156,26 @@ public class ReblockingGVCFBlockCombiner extends GVCFBlockCombiner implements Pu
                 vcfOutputEnd = blockEnd;
                 completedBlocks.add(builder);
             }
-            bufferEnd = blockEnd;  //keep track of observed ends
+            //bufferEnd = blockEnd;  //keep track of observed ends
         }
         homRefBlockBuffer.removeAll(completedBlocks);
-        if ((g.isHomRef() && !g.hasPL()) || (g.hasPL() && g.getPL()[0] == 0)) {  //funky logic for DRAGEN GVCFs where call may not match PLs
+        if (isHomRef(g)) {
             if (ReblockGVCF.isHomRefBlock(variantContextToOutput) && newHomRefBlock.getStart() < vcfOutputEnd) {
                 throw new IllegalStateException("Reference positions added to buffer should not overlap positions already output to VCF. "
                         + variantContextToOutput.getStart() + " overlaps position " + currentContig + ":" + vcfOutputEnd + " already emitted.");
             }
             homRefBlockBuffer.add(newHomRefBlock);
             bufferEnd = Math.max(bufferEnd, (int)newHomRefBlock.getStop());
-        } else if (bufferEnd <= variantContextToOutput.getEnd()) {
+        } else if (bufferEnd >= variantContextToOutput.getEnd() || homRefBlockBuffer.isEmpty()) {  //
             super.submit(variantContextToOutput);
-            vcfOutputEnd = variantContextToOutput.getEnd();
+            vcfOutputEnd = Math.max(vcfOutputEnd, variantContextToOutput.getEnd());  //there may have been a previous, larger deletion
         }
         homRefBlockBuffer.addAll(tailBuffer);
         homRefBlockBuffer.sort(VCB_COMPARATOR);  //this may seem lazy, but it's more robust to assumptions about overlap being violated
+    }
+    //funky logic for DRAGEN GVCFs where call may not match PLs
+    private boolean isHomRef(final Genotype g) {
+        return (g.isHomRef() && !g.hasPL()) || (g.hasPL() && g.getPL()[0] == 0);
     }
 
     /**
@@ -187,7 +198,7 @@ public class ReblockingGVCFBlockCombiner extends GVCFBlockCombiner implements Pu
             tailBuffer.add(blockTailBuilder);
             builder.stop(variantStart-1);
             builder.attribute(VCFConstants.END_KEY, variantStart-1);
-            //blockEnd = variantEnd;
+            blockEnd = variantStart-1;
         }
         if (blockStart < variantStart) { //right trim
             if (blockStart > variantStart - 1) {
@@ -218,7 +229,11 @@ public class ReblockingGVCFBlockCombiner extends GVCFBlockCombiner implements Pu
     private void flushRefBlockBuffer() {
         for (final VariantContextBuilder builder : homRefBlockBuffer) {
             //toOutput.add(builder.make());
-            super.submit(builder.make());
+            try {
+                super.submit(builder.make());
+            } catch (Exception e) {
+                throw new GATKException("builder threw an exception at " + builder.getContig() + ":" + builder.getStart(), e);
+            }
             vcfOutputEnd = (int)builder.getStop();
         }
         homRefBlockBuffer.clear();
@@ -247,6 +262,10 @@ public class ReblockingGVCFBlockCombiner extends GVCFBlockCombiner implements Pu
     public int getVcfOutputEnd() {
         return vcfOutputEnd;
     }
+
+    public String getCurrentContig() { return currentContig; }
+
+    public int getBufferEnd() { return bufferEnd; }
 
     @Override
     public void signalEndOfInput() {

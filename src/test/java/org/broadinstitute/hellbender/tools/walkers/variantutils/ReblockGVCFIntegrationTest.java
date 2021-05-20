@@ -3,10 +3,7 @@ package org.broadinstitute.hellbender.tools.walkers.variantutils;
 import htsjdk.variant.variantcontext.Allele;
 import htsjdk.variant.variantcontext.Genotype;
 import htsjdk.variant.variantcontext.VariantContext;
-import htsjdk.variant.vcf.VCFHeader;
-import htsjdk.variant.vcf.VCFHeaderLineCount;
-import htsjdk.variant.vcf.VCFHeaderLineType;
-import htsjdk.variant.vcf.VCFInfoHeaderLine;
+import htsjdk.variant.vcf.*;
 import org.apache.commons.lang3.tuple.Pair;
 import org.broadinstitute.hellbender.CommandLineProgramTest;
 import org.broadinstitute.hellbender.GATKBaseTest;
@@ -74,6 +71,27 @@ public class ReblockGVCFIntegrationTest extends CommandLineProgramTest {
                     (a, e) -> VariantContextTestUtils.assertVariantContextsAreEqual(a, e,
                             Collections.emptyList(), Collections.emptyList()));
         }
+    }
+
+    @Test
+    public void testContiguityWithSpanningDels() {
+        final File input = new File(getToolTestDataDir() + "regressionTests.vcf");
+        final File intervals = new File(getToolTestDataDir() + "regressionContinuityIntervals.list");
+        final File output = createTempFile("reblockedgvcf", ".vcf");
+
+        final ArgumentsBuilder args = new ArgumentsBuilder();
+        args.addReference(new File(hg38Reference))
+                .add("V", input.getAbsolutePath())
+                .addOutput(output);
+        runCommandLine(args);
+
+        final CommandLineProgramTester validator = ValidateVariants.class::getSimpleName;
+        final ArgumentsBuilder args2 = new ArgumentsBuilder();
+        args2.add("R", hg38Reference);
+        args2.add("V", output.getAbsolutePath());
+        args2.add("L", intervals.getAbsolutePath());
+        args2.addRaw("-gvcf");  //TODO: add --no-overlaps after ValidateVariants update is merged
+        validator.runCommandLine(args2);  //will throw a UserException if GVCF isn't contiguous
     }
 
     @Test  //absolute minimal output
@@ -241,10 +259,6 @@ public class ReblockGVCFIntegrationTest extends CommandLineProgramTest {
                         " --" + StandardArgumentDefinitions.ADD_OUTPUT_VCF_COMMANDLINE + " false",
                 Arrays.asList(getToolTestDataDir() + "expected.overlappingDeletions.g.vcf"));
         spec.executeTest("testOverlappingDeletions", this);
-
-        //Note that there's a star in the output that's not associated with any deletion, which isn't great, but
-        //it is covered by a lot of deletions, just each deletion by itself is very low quality.
-        //This could be resolved by this tool, but at the expense of a lot more complexity.
     }
 
     @Test

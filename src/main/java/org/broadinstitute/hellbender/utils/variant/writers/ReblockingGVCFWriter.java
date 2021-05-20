@@ -1,7 +1,9 @@
 package org.broadinstitute.hellbender.utils.variant.writers;
 
+import htsjdk.samtools.util.Locatable;
 import htsjdk.variant.variantcontext.VariantContext;
 import htsjdk.variant.variantcontext.writer.VariantContextWriter;
+import org.broadinstitute.hellbender.utils.SimpleInterval;
 import org.broadinstitute.hellbender.utils.fasta.CachingIndexedFastaSequenceFile;
 
 import java.util.List;
@@ -21,7 +23,20 @@ public class ReblockingGVCFWriter extends GVCFWriter {
         output();
     }
 
-    public int getVcfOutputEnd() {
-        return ((ReblockingGVCFBlockCombiner)gvcfBlockCombiner).getVcfOutputEnd();
+
+    /**
+     *
+     * @return may be null
+     */
+    public Locatable getVcfOutputEnd() {
+        final int position = ((ReblockingGVCFBlockCombiner)gvcfBlockCombiner).getVcfOutputEnd();
+        final String contig = ((ReblockingGVCFBlockCombiner)gvcfBlockCombiner).getCurrentContig();
+        if (contig == null) {
+            return null;
+        }
+        return new SimpleInterval(contig, position, position);
     }
+
+    public boolean siteOverlapsBuffer(final VariantContext vc) { return vc.getContig().equals(((ReblockingGVCFBlockCombiner)gvcfBlockCombiner).getCurrentContig())
+            && vc.getStart() <= ((ReblockingGVCFBlockCombiner)gvcfBlockCombiner).getBufferEnd(); }
 }

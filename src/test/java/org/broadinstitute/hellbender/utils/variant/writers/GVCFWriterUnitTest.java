@@ -43,7 +43,7 @@ public class GVCFWriterUnitTest extends GATKBaseTest {
     private static final String SAMPLE_NAME = "XXYYZZ";
 
 
-    static final class MockWriter implements VariantContextWriter {
+    static public final class MockWriter implements VariantContextWriter {
         final List<VariantContext> emitted = new ArrayList<>();
         boolean headerWritten = false;
         boolean closed = false;
