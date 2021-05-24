@@ -12,6 +12,7 @@ import java.util.List;
 
 public class LocusDepthBCICodec extends AbstractBCICodec<LocusDepth> {
     private boolean versionChecked = false;
+    private SAMSequenceDictionary dict;
     private static final String LD_BCI_FILE_EXTENSION = ".ld.bci";
 
     @Override
@@ -23,7 +24,7 @@ public class LocusDepthBCICodec extends AbstractBCICodec<LocusDepth> {
             }
             versionChecked = true;
         }
-        return new LocusDepth(reader.getDictionary(), reader.getStream());
+        return new LocusDepth(reader.getStream(), reader.getDictionary());
     }
 
     @Override
@@ -39,6 +40,7 @@ public class LocusDepthBCICodec extends AbstractBCICodec<LocusDepth> {
                                         final SAMSequenceDictionary dict,
                                         final List<String> sampleNames,
                                         final int compressionLevel ) {
+        this.dict = dict;
         final String className = LocusDepth.class.getSimpleName();
         return new Writer<>(path,
                             new FeaturesHeader(className, LocusDepth.BCI_VERSION, dict, sampleNames),
@@ -49,6 +51,6 @@ public class LocusDepthBCICodec extends AbstractBCICodec<LocusDepth> {
     @Override
     public void encode( final LocusDepth locusDepth, final Writer<LocusDepth> writer )
             throws IOException {
-        locusDepth.write(writer.getStream());
+        locusDepth.write(writer.getStream(), dict);
     }
 }

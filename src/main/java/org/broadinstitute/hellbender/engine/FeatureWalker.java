@@ -59,19 +59,18 @@ public abstract class FeatureWalker<F extends Feature> extends WalkerBase {
         final GATKPath drivingPath = getDrivingFeaturePath();
         final FeatureCodec<? extends Feature, ?> codec = FeatureManager.getCodecForFile(drivingPath.toPath());
         if (isAcceptableFeatureType(codec.getFeatureType())) {
-            final SAMSequenceDictionary dictionary = getBestAvailableSequenceDictionary();
             final GenomicsDBOptions options = new GenomicsDBOptions(referenceArguments.getReferencePath());
             final FeatureInput<F> drivingFeatureInput = new FeatureInput<>(drivingPath);
             drivingFeatureInput.setFeatureCodecClass((Class<FeatureCodec<F, ?>>)codec.getClass());
             drivingFeatures = new FeatureDataSource<>(drivingFeatureInput, FeatureDataSource.DEFAULT_QUERY_LOOKAHEAD_BASES, null,
-                    cloudPrefetchBuffer, cloudIndexPrefetchBuffer, options, false, dictionary);
+                    cloudPrefetchBuffer, cloudIndexPrefetchBuffer, options, false);
             header = drivingFeatures.getHeader();
 
             final FeatureInput<F> featureInput = new FeatureInput<>(drivingPath, "drivingFeatureFile");
             featureInput.setFeatureCodecClass((Class<FeatureCodec<F, ?>>)codec.getClass());
             features.addToFeatureSources(featureInput,
                     new FeatureDataSource<>(drivingFeatureInput, FeatureDataSource.DEFAULT_QUERY_LOOKAHEAD_BASES, null,
-                        cloudPrefetchBuffer, cloudIndexPrefetchBuffer, options, false, dictionary));
+                        cloudPrefetchBuffer, cloudIndexPrefetchBuffer, options, false));
         } else {
             throw new UserException("File " + drivingPath.getRawInputString() + " contains features of the wrong type.");
         }

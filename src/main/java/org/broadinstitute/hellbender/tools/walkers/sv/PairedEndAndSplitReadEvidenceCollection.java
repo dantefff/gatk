@@ -4,8 +4,9 @@ import com.google.common.annotations.VisibleForTesting;
 import htsjdk.samtools.CigarElement;
 import htsjdk.samtools.CigarOperator;
 import htsjdk.samtools.SAMSequenceDictionary;
-import htsjdk.samtools.SAMSequenceRecord;
+import htsjdk.samtools.util.Locatable;
 import htsjdk.variant.variantcontext.VariantContext;
+import org.apache.logging.log4j.LogManager;
 import org.broadinstitute.barclay.argparser.Argument;
 import org.broadinstitute.barclay.argparser.BetaFeature;
 import org.broadinstitute.barclay.argparser.CommandLineProgramProperties;
@@ -17,11 +18,9 @@ import org.broadinstitute.hellbender.exceptions.UserException;
 import org.broadinstitute.hellbender.tools.sv.DiscordantPairEvidence;
 import org.broadinstitute.hellbender.tools.sv.LocusDepth;
 import org.broadinstitute.hellbender.tools.sv.SplitReadEvidence;
-import org.broadinstitute.hellbender.utils.CollatingInterval;
 import org.broadinstitute.hellbender.utils.Nucleotide;
+import org.broadinstitute.hellbender.utils.SimpleInterval;
 import org.broadinstitute.hellbender.utils.codecs.*;
-import org.broadinstitute.hellbender.utils.io.BlockCompressedIntervalStream.Writer;
-import org.broadinstitute.hellbender.utils.io.FeatureOutputStream;
 import org.broadinstitute.hellbender.utils.read.GATKRead;
 
 import java.util.*;
@@ -179,28 +178,30 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
         final String peFilename = peFile.toPath().toString();
         final List<String> sampleNames = Collections.singletonList(sampleName);
         final DiscordantPairEvidenceCodec peCodec = new DiscordantPairEvidenceCodec();
-        if ( peCodec.canDecode(peFilename) ) {
-            return peCodec.makeSink(peFile, sequenceDictionary, sampleNames, compressionLevel);
-        }
         final DiscordantPairEvidenceBCICodec peBCICodec = new DiscordantPairEvidenceBCICodec();
         if ( peBCICodec.canDecode(peFilename) ) {
             return peBCICodec.makeSink(peFile, sequenceDictionary, sampleNames, compressionLevel);
         }
-        throw new UserException("no codec knows how to write " + peFilename);
+        if ( !peCodec.canDecode(peFilename) ) {
+            logger.warn("Writing discordant pair evidence to a file that can't be read as " +
+                    "discordant pair evidence: " + peFilename);
+        }
+        return peCodec.makeSink(peFile, sequenceDictionary, sampleNames, compressionLevel);
     }
 
     private FeatureSink<SplitReadEvidence> createSRWriter() {
         final String srFilename = srFile.toPath().toString();
         final List<String> sampleNames = Collections.singletonList(sampleName);
         final SplitReadEvidenceCodec srCodec = new SplitReadEvidenceCodec();
-        if ( srCodec.canDecode(srFilename) ) {
-            return srCodec.makeSink(srFile, sequenceDictionary, sampleNames, compressionLevel);
-        }
         final SplitReadEvidenceBCICodec srBCICodec = new SplitReadEvidenceBCICodec();
         if ( srBCICodec.canDecode(srFilename) ) {
             return srBCICodec.makeSink(srFile, sequenceDictionary, sampleNames, compressionLevel);
         }
-        throw new UserException("no codec knows how to write " + srFilename);
+        if ( !srCodec.canDecode(srFilename) ) {
+            logger.warn("Writing split read evidence to a file that can't be read as " +
+                    "split read evidence: " + srFilename);
+        }
+        return srCodec.makeSink(srFile, sequenceDictionary, sampleNames, compressionLevel);
     }
 
     private void reportDiscordantReadPair(final GATKRead read) {
@@ -530,14 +531,17 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
                               final int minQ ) {
             this.dict = dict;
             final String outputFilename = outputPath.toPath().toString();
-            final LocusDepthCodec codec = new LocusDepthCodec();
             final LocusDepthBCICodec bciCodec = new LocusDepthBCICodec();
-            if ( codec.canDecode(outputFilename) ) {
-                this.writer = codec.makeSink(outputPath, dict, sampleNames, compressionLevel);
-            } else if ( bciCodec.canDecode(outputFilename) ) {
+            if ( bciCodec.canDecode(outputFilename) ) {
                 this.writer = bciCodec.makeSink(outputPath, dict, sampleNames, compressionLevel);
             } else {
-                throw new UserException("no codec knows how to write " + outputFilename);
+                final LocusDepthCodec codec = new LocusDepthCodec();
+                if ( !codec.canDecode(outputFilename) ) {
+                    LogManager.getLogger(AlleleCounter.class)
+                            .warn("Writing locus depth evidence to a file that can't be read as " +
+                                    "locus depth evidence: " + outputFilename);
+                }
+                this.writer = codec.makeSink(outputPath, dict, sampleNames, compressionLevel);
             }
             this.minMapQ = minMapQ;
             this.minQ = minQ;
@@ -555,11 +559,11 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
             }
 
             // clean queue of LocusCounts that precede the current read
-            final CollatingInterval readInterval = new CollatingInterval(dict, read);
+            final SimpleInterval readLoc =
+                    new SimpleInterval(read.getContig(), read.getStart(), read.getEnd());
             while ( true ) {
                 final LocusDepth locusDepth = locusDepthQueue.getFirst();
-                final SAMSequenceRecord rec = locusDepth.getSequenceRecord();
-                if ( readInterval.compareLocus(rec, locusDepth.getStart()) >= 0 ) {
+                if ( compareLocus(locusDepth.getContig(), locusDepth.getStart(), readLoc) >= 0 ) {
                     break;
                 }
                 writer.write(locusDepthQueue.removeFirst());
@@ -574,8 +578,7 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
             //  if such a LocusCount is available
             while ( true ) {
                 final LocusDepth locusDepth = locusDepthQueue.getLast();
-                final SAMSequenceRecord rec = locusDepth.getSequenceRecord();
-                if ( readInterval.compareLocus(rec, locusDepth.getStart()) > 0 ||
+                if ( compareLocus(locusDepth.getContig(), locusDepth.getStart(), readLoc) > 0 ||
                         !readNextLocus() ) {
                     break;
                 }
@@ -589,17 +592,16 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
             int readIdx = 0;
             final byte[] calls = read.getBasesNoCopy();
             final byte[] quals = read.getBaseQualitiesNoCopy();
-            final SAMSequenceRecord contig = dict.getSequence(read.getContig());
             for ( final CigarElement cigEle : read.getCigar().getCigarElements() ) {
                 final int eleLen = cigEle.getLength();
                 final CigarOperator cigOp = cigEle.getOperator();
                 if ( cigOp.isAlignment() ) {
                     final int opEnd = opStart + eleLen - 1;
-                    final CollatingInterval opInterval =
-                            new CollatingInterval(contig, opStart, opEnd);
+                    final SimpleInterval opLoc =
+                            new SimpleInterval(read.getContig(), opStart, opEnd);
                     for ( final LocusDepth locusDepth : locusDepthQueue ) {
-                        final SAMSequenceRecord locusContig = locusDepth.getSequenceRecord();
-                        final int cmp = opInterval.compareLocus(locusContig, locusDepth.getStart());
+                        final int cmp =
+                                compareLocus(locusDepth.getContig(), locusDepth.getStart(), opLoc);
                         if ( cmp > 0 ) {
                             break;
                         }
@@ -631,6 +633,18 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
             writer.close();
         }
 
+        private int compareLocus( final String contig, final int position, final Locatable loc ) {
+            int cmp = Integer.compare(dict.getSequenceIndex(contig), dict.getSequenceIndex(loc.getContig()));
+            if ( cmp == 0 ) {
+                if ( position < loc.getStart() ) {
+                    cmp = -1;
+                } else if ( position > loc.getEnd() ) {
+                    cmp = 1;
+                }
+            }
+            return cmp;
+        }
+
         private boolean readNextLocus() {
             if ( !snpSourceItr.hasNext() ) {
                 return false;
@@ -654,8 +668,7 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
                 throw new UserException("vcf contains a SNP with a non-standard alt base" +
                         altCall + " at locus " + snp.getContig() + ":" + snp.getStart());
             }
-            final LocusDepth locusDepth =
-                    new LocusDepth(dict, snp, refCall.ordinal(), altCall.ordinal());
+            final LocusDepth locusDepth = new LocusDepth(snp, refCall.ordinal(), altCall.ordinal());
             locusDepthQueue.add(locusDepth);
             return true;
         }

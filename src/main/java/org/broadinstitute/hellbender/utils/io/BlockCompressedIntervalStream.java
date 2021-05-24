@@ -14,10 +14,10 @@ import org.broadinstitute.hellbender.engine.FeatureInput;
 import org.broadinstitute.hellbender.engine.GATKPath;
 import org.broadinstitute.hellbender.exceptions.GATKException;
 import org.broadinstitute.hellbender.exceptions.UserException;
-import org.broadinstitute.hellbender.utils.CollatingInterval;
+import org.broadinstitute.hellbender.tools.spark.sv.utils.SVInterval;
+import org.broadinstitute.hellbender.tools.spark.sv.utils.SVIntervalTree;
 import org.broadinstitute.hellbender.utils.codecs.FeatureSink;
 import org.broadinstitute.hellbender.utils.codecs.FeaturesHeader;
-import org.broadinstitute.hellbender.utils.collections.IntervalTree;
 
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
@@ -58,30 +58,31 @@ public class BlockCompressedIntervalStream {
     public static final String BCI_FILE_EXTENSION = ".bci";
 
     // each compressed block of data will have (at least) one of these as a part of the index
-    // for each contig that appears in a compressed block the CollatingInterval tracks the smallest
+    // for each contig that appears in a compressed block, the SVInterval tracks the smallest
     //   starting coordinate and largest end coordinate of any object in the block
     // the filePosition member is the virtual file offset of the first object in the block (or, the
     //   first object for a new contig, if there are multiple contigs represented within the block)
     public final static class IndexEntry {
-        final CollatingInterval interval;
+        final SVInterval interval;
         long filePosition;
 
-        public IndexEntry( final CollatingInterval interval, final long filePosition ) {
+        public IndexEntry( final SVInterval interval, final long filePosition ) {
             this.interval = interval;
             this.filePosition = filePosition;
         }
 
-        public IndexEntry( final DataInputStream dis,
-                           final SAMSequenceDictionary dict ) throws IOException {
-            this.interval = new CollatingInterval(dict, dis);
+        public IndexEntry( final DataInputStream dis ) throws IOException {
+            this.interval = new SVInterval(dis.readInt(), dis.readInt(), dis.readInt());
             this.filePosition = dis.readLong();
         }
 
-        public CollatingInterval getInterval() { return interval; }
+        public SVInterval getInterval() { return interval; }
         public long getFilePosition() { return filePosition; }
 
         public void write( final DataOutputStream dos ) throws IOException {
-            interval.write(dos);
+            dos.writeInt(interval.getContig());
+            dos.writeInt(interval.getStart());
+            dos.writeInt(interval.getEnd());
             dos.writeLong(filePosition);
         }
     }
@@ -93,8 +94,7 @@ public class BlockCompressedIntervalStream {
 
     // a class for writing arbitrary objects to a block compressed stream with a self-contained index
     // the only restriction is that you must supply a lambda that writes enough state to a DataOutputStream
-    //   to allow you to reconstitute the object when you read it back in later AND you have to
-    //   return an CollatingInterval so that we can do indexing.
+    //   to allow you to reconstitute the object when you read it back in later
     public static class Writer <F extends Feature> implements FeatureSink<F> {
         final String path;
         final SAMSequenceDictionary dict;
@@ -106,7 +106,7 @@ public class BlockCompressedIntervalStream {
         Feature lastInterval;
         final List<IndexEntry> indexEntries;
         long blockFilePosition;
-        String blockContig;
+        int blockContig;
         int blockStart;
         int blockEnd;
         boolean firstBlockMember;
@@ -285,15 +285,14 @@ public class BlockCompressedIntervalStream {
         private void startBlock( final long filePosition, final Feature interval ) {
             blockFilePosition = filePosition;
             lastInterval = interval;
-            blockContig = interval.getContig();
+            blockContig = dict.getSequenceIndex(interval.getContig());
             blockStart = interval.getStart();
             blockEnd = interval.getEnd();
             firstBlockMember = false;
         }
 
         private void addIndexEntry() {
-            final CollatingInterval blockInterval =
-                    new CollatingInterval(dict, blockContig, blockStart, blockEnd);
+            final SVInterval blockInterval = new SVInterval(blockContig, blockStart, blockEnd);
             indexEntries.add(new IndexEntry(blockInterval, blockFilePosition));
         }
     }
@@ -309,7 +308,7 @@ public class BlockCompressedIntervalStream {
         final DataInputStream dis;
         final FeaturesHeader header;
         final long dataFilePointer;
-        IntervalTree<Long> index;
+        SVIntervalTree<Long> index;
         boolean usedByIterator;
 
         public Reader( final FeatureInput<T> inputDescriptor, final FeatureCodec<T, Reader<T>> codec ) {
@@ -388,8 +387,8 @@ public class BlockCompressedIntervalStream {
             if ( index == null ) {
                 loadIndex(bcis);
             }
-            final CollatingInterval interval =
-                    new CollatingInterval(getDictionary(), chr, start, end);
+            final SVInterval interval =
+                    new SVInterval(getDictionary().getSequenceIndex(chr), start, end);
             return new OverlapIterator<>(interval, this);
         }
 
@@ -500,14 +499,13 @@ public class BlockCompressedIntervalStream {
         }
 
         private void loadIndex( final BlockCompressedInputStream bcis ) {
-            final IntervalTree<Long> intervalTree = new IntervalTree<>();
+            final SVIntervalTree<Long> intervalTree = new SVIntervalTree<>();
             try {
                 bcis.seek(indexFilePointer);
                 final DataInputStream dis = new DataInputStream(bcis);
-                final SAMSequenceDictionary dict = getDictionary();
                 int nEntries = dis.readInt();
                 while ( nEntries-- > 0 ) {
-                    final IndexEntry entry = new IndexEntry(dis, dict);
+                    final IndexEntry entry = new IndexEntry(dis);
                     intervalTree.put(entry.getInterval(), entry.getFilePosition());
                 }
                 bcis.seek(dataFilePointer);
@@ -553,13 +551,13 @@ public class BlockCompressedIntervalStream {
         // find all the objects in the stream inflating just those blocks that might have relevant objects
         private static class OverlapIterator <T extends Feature>
                 implements CloseableTribbleIterator<T> {
-            final CollatingInterval interval;
+            final SVInterval interval;
             final Reader<T> reader;
-            final Iterator<IntervalTree.Entry<Long>> indexEntryIterator;
+            final Iterator<SVIntervalTree.Entry<Long>> indexEntryIterator;
             long blockStartPosition;
             T nextT;
 
-            public OverlapIterator( final CollatingInterval interval, final Reader<T> reader ) {
+            public OverlapIterator( final SVInterval interval, final Reader<T> reader ) {
                 this.interval = interval;
                 this.reader = reader.getReaderForIterator();
                 this.indexEntryIterator = reader.index.overlappers(interval);
@@ -594,11 +592,14 @@ public class BlockCompressedIntervalStream {
                         reader.seekStream(blockStartPosition);
                     }
                     nextT = reader.readStream();
-                    if ( !interval.contigsMatch(nextT) || interval.getEnd() < nextT.getStart() ) {
+                    final int nextContigId =
+                            reader.getDictionary().getSequenceIndex(nextT.getContig());
+                    if ( interval.getContig() != nextContigId ||
+                            interval.getEnd() < nextT.getStart() ) {
                         nextT = null;
                         return;
                     }
-                } while ( !interval.overlaps(nextT) );
+                } while ( nextT.getEnd() < interval.getStart() );
             }
         }
     }

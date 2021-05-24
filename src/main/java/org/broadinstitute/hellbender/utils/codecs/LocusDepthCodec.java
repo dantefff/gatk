@@ -14,8 +14,7 @@ import org.broadinstitute.hellbender.utils.io.FeatureOutputStream;
 import java.util.List;
 
 public class LocusDepthCodec extends AsciiFeatureCodec<LocusDepth>
-        implements FeatureOutputCodec<LocusDepth, FeatureOutputStream<LocusDepth>>, NeedsDictionary {
-    private SAMSequenceDictionary dict;
+        implements FeatureOutputCodec<LocusDepth, FeatureOutputStream<LocusDepth>> {
     public static final String FORMAT_SUFFIX = ".ld.txt";
     private static final Splitter splitter = Splitter.on("\t");
 
@@ -32,7 +31,7 @@ public class LocusDepthCodec extends AsciiFeatureCodec<LocusDepth>
         if ( tokens.size() != 6 ) {
             throw new IllegalArgumentException("Invalid number of columns: " + tokens.size());
         }
-        return new LocusDepth(dict, tokens.get(0),
+        return new LocusDepth(tokens.get(0),
                 Integer.parseUnsignedInt(tokens.get(1)) + 1,
                 Nucleotide.decode(tokens.get(2)).ordinal(),
                 Nucleotide.decode(tokens.get(3)).ordinal(),
@@ -72,9 +71,5 @@ public class LocusDepthCodec extends AsciiFeatureCodec<LocusDepth>
         return locusDepth.getContig() + "\t" + (locusDepth.getStart() - 1) + "\t" +
                 locusDepth.getRefCall() + "\t" + locusDepth.getAltCall() + "\t" +
                 locusDepth.getTotalDepth() + "\t" + locusDepth.getAltDepth();
-    }
-
-    public void setDictionary( final SAMSequenceDictionary dictionary ) {
-        dict = dictionary;
     }
 }

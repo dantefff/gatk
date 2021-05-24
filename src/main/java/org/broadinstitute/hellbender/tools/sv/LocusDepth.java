@@ -2,7 +2,6 @@ package org.broadinstitute.hellbender.tools.sv;
 
 import com.google.common.annotations.VisibleForTesting;
 import htsjdk.samtools.SAMSequenceDictionary;
-import htsjdk.samtools.SAMSequenceRecord;
 import htsjdk.samtools.util.Locatable;
 import htsjdk.tribble.Feature;
 import org.broadinstitute.hellbender.utils.Nucleotide;
@@ -13,7 +12,7 @@ import java.io.IOException;
 
 @VisibleForTesting
 public final class LocusDepth implements Feature {
-    private final SAMSequenceRecord contig;
+    private final String contig;
     private final int position;
     private final int refIdx; // index into nucleotideValues
     private final int altIdx; // index into nucleotideValues
@@ -24,16 +23,14 @@ public final class LocusDepth implements Feature {
     // our own private copy so that we don't make repeated array allocations
     private final static Nucleotide[] nucleotideValues = Nucleotide.values();
 
-    public LocusDepth( final SAMSequenceDictionary dict, final Locatable loc,
-                       final int refIdx, final int altIdx ) {
-        this(dict, loc.getContig(), loc.getStart(), refIdx, altIdx, 0, 0);
+    public LocusDepth( final Locatable loc, final int refIdx, final int altIdx ) {
+        this(loc.getContig(), loc.getStart(), refIdx, altIdx, 0, 0);
     }
 
-    public LocusDepth( final SAMSequenceDictionary dict,
-                       final String contigName, final int position,
+    public LocusDepth( final String contig, final int position,
                        final int refIdx, final int altIdx,
                        final int totalDepth, final int altDepth ) {
-        this.contig = dict.getSequence(contigName);
+        this.contig = contig;
         this.position = position;
         this.refIdx = refIdx;
         this.altIdx = altIdx;
@@ -41,9 +38,8 @@ public final class LocusDepth implements Feature {
         this.altDepth = altDepth;
     }
 
-    public LocusDepth( final SAMSequenceDictionary dict,
-                       final DataInputStream dis ) throws IOException {
-        contig = dict.getSequence(dis.readInt());
+    public LocusDepth( final DataInputStream dis, final SAMSequenceDictionary dict ) throws IOException {
+        contig = dict.getSequence(dis.readInt()).getSequenceName();
         position = dis.readInt();
         refIdx = dis.readByte();
         altIdx = dis.readByte();
@@ -56,13 +52,9 @@ public final class LocusDepth implements Feature {
         totalDepth += 1;
     }
 
-    public SAMSequenceRecord getSequenceRecord() {
-        return contig;
-    }
-
     @Override
     public String getContig() {
-        return contig.getSequenceName();
+        return contig;
     }
 
     @Override
@@ -91,8 +83,9 @@ public final class LocusDepth implements Feature {
         return totalDepth;
     }
 
-    public void write( final DataOutputStream dos ) throws IOException {
-        dos.writeInt(contig.getSequenceIndex());
+    public void write( final DataOutputStream dos,
+                       final SAMSequenceDictionary dict ) throws IOException {
+        dos.writeInt(dict.getSequenceIndex(contig));
         dos.writeInt(position);
         dos.writeByte(refIdx);
         dos.writeByte(altIdx);
