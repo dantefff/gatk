@@ -148,8 +148,10 @@ public final class PrintSVEvidence <F extends Feature> extends FeatureWalker<F> 
         final Object headerObj = getDrivingFeaturesHeader();
         if ( headerObj instanceof FeaturesHeader ) {
             final FeaturesHeader header = (FeaturesHeader)headerObj;
-            dict = header.getDictionary();
-            samples = header.getSampleNames();
+            dict = header.getDictionary() == null ?
+                    getBestAvailableSequenceDictionary() :
+                    header.getDictionary();
+            samples = header.getSampleNames() == null ? sampleNames : header.getSampleNames();
         } else {
             dict = getBestAvailableSequenceDictionary();
             samples = sampleNames;
