@@ -52,7 +52,7 @@ public class HomRefBlockUnitTest extends GATKBaseTest {
         final GenotypeBuilder gb = new GenotypeBuilder(SAMPLE_NAME);
         gb.alleles(vc.getAlleles());
 
-        int pos = band.getStart();
+        int pos = band.getStart() + 1;
         band.add(pos++, gb.DP(10).GQ(11).PL(new int[]{0,11,100}).make());
         Assert.assertEquals(band.getEnd(), pos - 1);
         assertValues(band, 10, 10);
@@ -111,8 +111,8 @@ public class HomRefBlockUnitTest extends GATKBaseTest {
     public void testCantAddDifferentNumbersOfPls(){
         final VariantContext vc = getVariantContext();
         final GVCFBlock band = getHomRefBlock(getVariantContext());
-        band.add(vc.getStart(), getValidGenotypeBuilder().make() );
-        band.add(vc.getStart() + 1, getValidGenotypeBuilder().PL(new int[] {1,2,4,5,6}).make() );
+        band.add(vc.getStart()+1, getValidGenotypeBuilder().make() );
+        band.add(vc.getStart() + 2, getValidGenotypeBuilder().PL(new int[] {1,2,4,5,6}).make() );
     }
 
     @Test
@@ -122,12 +122,12 @@ public class HomRefBlockUnitTest extends GATKBaseTest {
         final HomRefBlock band = getHomRefBlock(getVariantContext());
         Assert.assertNull(band.getMinPLs());
         Assert.assertEquals(band.getMinGQ(), -1);
-        band.add(vc.getStart(), getValidGenotypeBuilder().make() );
+        band.add(vc.getStart() + 1, getValidGenotypeBuilder().make() );
         Assert.assertNotNull(band.getMinPLs());
         Assert.assertEquals(band.getMinPLs()[1], getPLArray()[1]);
         Assert.assertEquals(band.getMinGQ(), getPLArray()[1]);
-        band.add(vc.getStart() + 1, getValidGenotypeBuilder().noPL().make());
-        Assert.assertEquals(band.getSize(), 2);
+        band.add(vc.getStart() + 2, getValidGenotypeBuilder().noPL().make());
+        Assert.assertEquals(band.getSize(), 3);
         Assert.assertEquals(band.getMinPLs()[1], getPLArray()[1]);
         Assert.assertEquals(band.getMinGQ(), getPLArray()[1]);
 
@@ -135,13 +135,13 @@ public class HomRefBlockUnitTest extends GATKBaseTest {
         final HomRefBlock band2 = getHomRefBlock(getVariantContext());
         Assert.assertNull(band2.getMinPLs());
         Assert.assertEquals(band2.getMinGQ(), -1);
-        band2.add(vc.getStart(), getValidGenotypeBuilder().noPL().make() );
+        band2.add(vc.getStart() + 1, getValidGenotypeBuilder().noPL().make() );
         Assert.assertEquals(band2.getMinGQ(), getPLArray()[1]);
         Assert.assertNull(band2.getMinPLs());
-        band2.add(vc.getStart() + 1, getValidGenotypeBuilder().noPL().make());
+        band2.add(vc.getStart() + 2, getValidGenotypeBuilder().noPL().make());
         Assert.assertNull(band2.getMinPLs());
         Assert.assertEquals(band2.getMinGQ(), getPLArray()[1]);
-        Assert.assertTrue(band2.getSize() == 2);
+        Assert.assertTrue(band2.getSize() == 3);
     }
 
     private static int[] getPLArray() {
@@ -161,7 +161,7 @@ public class HomRefBlockUnitTest extends GATKBaseTest {
 
         for ( final String chrMod : Arrays.asList("", ".mismatch") ) {
             for ( final int offset : Arrays.asList(-10, -1, 0, 1, 10) ) {
-                final boolean equals = chrMod.isEmpty() && (offset == 0 || offset == 1); //allow adding of VCs with same start or adjacent start
+                final boolean equals = chrMod.isEmpty() && (Math.abs(offset) <= 1); //allow adding of VCs with overlap or adjacent start
                 tests.add(new Object[]{vc.getContig() + chrMod, vc.getStart() + offset, equals});
             }
         }
@@ -185,8 +185,8 @@ public class HomRefBlockUnitTest extends GATKBaseTest {
         final Genotype genotype2 = gb.GQ(17).DP(10).PL(new int[]{0, 5, 80}).make();
 
         final HomRefBlock block = getHomRefBlock(vc);
-        block.add(vc.getEnd(), genotype1);
-        block.add(vc.getEnd() + 1, genotype2);
+        block.add(vc.getEnd() + 1, genotype1);
+        block.add(vc.getEnd() + 2, genotype2);
 
         final VariantContext newVc = block.toVariantContext(SAMPLE_NAME, false);
         Assert.assertEquals(newVc.getGenotypes().size(), 1);
@@ -207,7 +207,7 @@ public class HomRefBlockUnitTest extends GATKBaseTest {
 
         // Test that adding a Genotype with GQ > 99 succeeds (ie., doesn't throw).
         // Internally, HomRefBlock should treat this GQ as 99.
-        block90_100.add(vc.getStart(), new GenotypeBuilder(SAMPLE_NAME, vc.getAlleles()).GQ(150).DP(10).PL(new int[]{0, 10, 100}).make());
+        block90_100.add(vc.getStart()+1, new GenotypeBuilder(SAMPLE_NAME, vc.getAlleles()).GQ(150).DP(10).PL(new int[]{0, 10, 100}).make());
     }
 
     @Test(expectedExceptions = IllegalArgumentException.class)
