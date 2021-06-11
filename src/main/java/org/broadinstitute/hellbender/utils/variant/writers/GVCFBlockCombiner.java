@@ -163,7 +163,6 @@ public class GVCFBlockCombiner implements PushPullTransformer<VariantContext> {
 
         // create the block, add g to it, and return it for use
         final HomRefBlock block = new HomRefBlock(vc, partition.lowerEndpoint(), partition.upperEndpoint(), g.getPloidy());
-        block.add(vc.getStart(), vc.getAttributeAsInt(VCFConstants.END_KEY, vc.getStart()), g);
         return block;
     }
 

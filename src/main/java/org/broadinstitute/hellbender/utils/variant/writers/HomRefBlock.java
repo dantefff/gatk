@@ -51,6 +51,22 @@ final class HomRefBlock extends GVCFBlock {
         if ( lowerGQBound > upperGQBound ) { throw new IllegalArgumentException("bad lowerGQBound " + lowerGQBound + " as it's >= upperGQBound " + upperGQBound); }
 
         this.ploidy = startingVC.getMaxPloidy(defaultPloidy);
+        final Genotype g = startingVC.getGenotype(0);
+        if (g.hasPL()) {
+            this.minPLs = g.getPL();
+        }
+        if (g.hasExtendedAttribute(GATKVCFConstants.PHRED_SCALED_POSTERIORS_KEY)) {
+            this.minPPs = PosteriorProbabilitiesUtils.parsePosteriorsIntoPhredSpace(g);
+        }
+        if (minPPs != null) {
+            minGQ = GATKVariantContextUtils.calculateGQFromPLs(minPPs);
+        } else if (minPLs != null) {
+            minGQ = GATKVariantContextUtils.calculateGQFromPLs(minPLs);
+        }
+        if (g.hasDP()) {
+            DPs.add(Math.max(g.getDP(), 0)); // DP must be >= 0
+        }
+        end = startingVC.getAttributeAsInt(VCFConstants.END_KEY, startingVC.getStart());
     }
 
 

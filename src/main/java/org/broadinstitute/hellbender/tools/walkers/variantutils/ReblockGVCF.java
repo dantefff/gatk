@@ -236,7 +236,7 @@ public final class ReblockGVCF extends MultiVariantWalker {
     }
 
     @VisibleForTesting
-    void createVcfWriter(Set<VCFHeaderLine> headerLines) {
+    public void createVcfWriter(Set<VCFHeaderLine> headerLines) {
         final VariantContextWriter writer = createVCFWriter(outputFile);
 
         final ReblockingOptions reblockingOptions = new ReblockingOptions(dropLowQuals, allowMissingHomRefData, rgqThreshold);

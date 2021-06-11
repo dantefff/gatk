@@ -349,7 +349,7 @@ public final class AlleleSubsettingUtils {
                 continue;
             }
             final double[] glsVector = gls.getAsVector();
-            final int indexOfMostLikelyVariantGenotype = MathUtils.maxElementIndex(glsVector, allHomRefData ? 1 : 0, glsVector.length - 1);
+            final int indexOfMostLikelyVariantGenotype = MathUtils.maxElementIndex(glsVector, allHomRefData ? 1 : 0, glsVector.length);
             final double GLDiffBetweenRefAndBestVariantGenotype = Math.abs(glsVector[indexOfMostLikelyVariantGenotype] - glsVector[PL_INDEX_OF_HOM_REF]);
             final int ploidy = genotype.getPloidy() > 0 ? genotype.getPloidy() : defaultPloidy;
 
