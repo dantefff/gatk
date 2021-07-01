@@ -87,7 +87,7 @@ workflow GvsCreateFilterSet {
     String fq_gcs_path_to_tranches_file = "~{output_directory}/~{filter_set_name}.tranches_load.csv"
     String fq_gcs_path_to_filter_sites_file = "~{output_directory}/~{filter_set_name}.filter_set_load.tsv"
 
-    call GetBQTableLastModifiedDatetime as fq_samples_table_datetime {
+    call GetBQTableLastModifiedDatetime as SamplesTableDatetimeCheck {
         input:
             query_project = query_project,
             fq_table = fq_sample_table,
@@ -97,7 +97,7 @@ workflow GvsCreateFilterSet {
     call GetNumSamples {
         input:
             fq_sample_table = fq_sample_table,
-            fq_sample_table_lastmodified_timestamp = fq_samples_table_datetime.last_modified_timestamp,
+            fq_sample_table_lastmodified_timestamp = SamplesTableDatetimeCheck.last_modified_timestamp,
             service_account_json = service_account_json,
             project_id = query_project
     }
@@ -270,7 +270,7 @@ workflow GvsCreateFilterSet {
             query_project = query_project
     }
 
-    call GetBQTableLastModifiedDatetime as info_destination_table_datetime {
+    call GetBQTableLastModifiedDatetime as InfoTableLastModifiedCheck {
         input:
             query_project = query_project,
             fq_table = fq_info_destination_table,
@@ -283,12 +283,12 @@ workflow GvsCreateFilterSet {
             fq_destination_table = fq_info_destination_table,
             table_schema = "filter_set_name:string,type:string,location:integer,ref:string,alt:string,vqslod:float,culprit:string,training_label:string,yng_status:string",
             file_creation_done = CreateFilterSetFiles.done,
-            last_modified_timestamp = info_destination_table_datetime.last_modified_timestamp,
+            last_modified_timestamp = InfoTableLastModifiedCheck.last_modified_timestamp,
             service_account_json = service_account_json,
             query_project = query_project
     }
 
-    call GetBQTableLastModifiedDatetime as trances_destination_table_datetime {
+    call GetBQTableLastModifiedDatetime as TranchesTableLastModifiedCheck {
         input:
             query_project = query_project,
             fq_table = fq_tranches_destination_table,
@@ -301,12 +301,12 @@ workflow GvsCreateFilterSet {
             fq_destination_table = fq_tranches_destination_table,
             table_schema = "filter_set_name:string,target_truth_sensitivity:float,num_known:integer,num_novel:integer,known_ti_tv:float,novel_ti_tv:float,min_vqslod:float,filter_name:string,model:string,accessible_truth_sites:integer,calls_at_truth_sites:integer,truth_sensitivity:float",
             file_creation_done = CreateFilterSetFiles.done,
-            last_modified_timestamp = trances_destination_table_datetime.last_modified_timestamp,
+            last_modified_timestamp = TranchesTableLastModifiedCheck.last_modified_timestamp,
             service_account_json = service_account_json,
             query_project = query_project
     }
 
-    call GetBQTableLastModifiedDatetime as filter_sites_destination_table_datetime {
+    call GetBQTableLastModifiedDatetime as FilterSitesTableLastModifiedCheck {
         input:
             query_project = query_project,
             fq_table = fq_filter_sites_destination_table,
@@ -319,7 +319,7 @@ workflow GvsCreateFilterSet {
             fq_destination_table = fq_filter_sites_destination_table,
             table_schema = "filter_set_name:string,location:integer,filters:string",
             file_creation_done = CreateFilterSetFiles.done,
-            last_modified_timestamp = filter_sites_destination_table_datetime.last_modified_timestamp,
+            last_modified_timestamp = FilterSitesTableLastModifiedCheck.last_modified_timestamp,
             service_account_json = service_account_json,
             query_project = query_project
     }
@@ -624,7 +624,7 @@ task UploadGCSFileToBQ {
         String table_schema
 
         String last_modified_timestamp
-        Boolean file_creation_done
+        String file_creation_done
 
         File? service_account_json
         String query_project
