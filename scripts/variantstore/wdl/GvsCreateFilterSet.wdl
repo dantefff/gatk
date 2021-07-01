@@ -651,9 +651,11 @@ task UploadGCSFileToBQ {
         bq_table=$(echo ~{fq_destination_table} | sed s/\\./:/)
 
         echo "Loading ~{gcs_path_to_input_file} into ~{fq_destination_table}"
+        echo 'bq load --project_id=~{query_project} --skip_leading_rows 0 -F "~{file_delimiter}" --schema "~{table_schema}" ${bq_table} ~{gcs_path_to_input_file}'
+
         bq load --project_id=~{query_project} --skip_leading_rows 0 -F "~{file_delimiter}" \
         --schema "~{table_schema}" \
-        ~{fq_destination_table} \
+        ${bq_table} \
         ~{gcs_path_to_input_file} > status_bq_load_table
     >>>
 
