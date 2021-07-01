@@ -65,7 +65,7 @@ workflows:
        branches:
          - master
          - ah_var_store
-         - rsa_add_warp_filtering
+         - rsa_parallelize_create_filterset
    - name: GvsExtractCallset
      subclass: WDL
      primaryDescriptorPath: /scripts/variantstore/wdl/GvsExtractCallset.wdl

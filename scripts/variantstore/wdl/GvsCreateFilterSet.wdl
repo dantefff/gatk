@@ -18,12 +18,6 @@ workflow GvsCreateFilterSet {
         String query_project = data_project
         Array[String]? query_labels
 
-        String fq_sample_table = "~{data_project}.~{default_dataset}.sample_info"
-        String fq_alt_allele_table = "~{data_project}.~{default_dataset}.alt_allele"
-        String fq_info_destination_table = "~{data_project}.~{default_dataset}.filter_set_info"
-        String fq_tranches_destination_table = "~{data_project}.~{default_dataset}.filter_set_tranches"
-        String fq_filter_sites_destination_table = "~{data_project}.~{default_dataset}.filter_set_sites"
-
         String filter_set_name
 
         File? excluded_intervals
@@ -84,6 +78,11 @@ workflow GvsCreateFilterSet {
     }
 
     # don't need to make these inputs because they should be created and used within this workflow
+    String fq_sample_table = "~{data_project}.~{default_dataset}.sample_info"
+    String fq_alt_allele_table = "~{data_project}.~{default_dataset}.alt_allele"
+    String fq_info_destination_table = "~{data_project}.~{default_dataset}.filter_set_info"
+    String fq_tranches_destination_table = "~{data_project}.~{default_dataset}.filter_set_tranches"
+    String fq_filter_sites_destination_table = "~{data_project}.~{default_dataset}.filter_set_sites"
     String fq_gcs_path_to_info_file = "~{output_directory}/~{filter_set_name}.filter_sites_load.tsv"
     String fq_gcs_path_to_tranches_file = "~{output_directory}/~{filter_set_name}.tranches_load.csv"
     String fq_gcs_path_to_filter_sites_file = "~{output_directory}/~{filter_set_name}.filter_set_load.tsv"
@@ -271,7 +270,7 @@ workflow GvsCreateFilterSet {
             query_project = query_project
     }
 
-    call GetBQTableLastModifiedDatetime as fq_info_destination_table_datetime {
+    call GetBQTableLastModifiedDatetime as info_destination_table_datetime {
         input:
             query_project = query_project,
             fq_table = fq_info_destination_table,
@@ -284,12 +283,12 @@ workflow GvsCreateFilterSet {
             fq_destination_table = fq_info_destination_table,
             table_schema = "filter_set_name:string,type:string,location:integer,ref:string,alt:string,vqslod:float,culprit:string,training_label:string,yng_status:string",
             file_creation_done = CreateFilterSetFiles.done,
-            last_modified_timestamp = fq_info_destination_table_datetime.last_modified_timestamp,
+            last_modified_timestamp = info_destination_table_datetime.last_modified_timestamp,
             service_account_json = service_account_json,
             query_project = query_project
     }
 
-    call GetBQTableLastModifiedDatetime as fq_trances_destination_table_datetime {
+    call GetBQTableLastModifiedDatetime as trances_destination_table_datetime {
         input:
             query_project = query_project,
             fq_table = fq_tranches_destination_table,
@@ -302,12 +301,12 @@ workflow GvsCreateFilterSet {
             fq_destination_table = fq_tranches_destination_table,
             table_schema = "filter_set_name:string,target_truth_sensitivity:float,num_known:integer,num_novel:integer,known_ti_tv:float,novel_ti_tv:float,min_vqslod:float,filter_name:string,model:string,accessible_truth_sites:integer,calls_at_truth_sites:integer,truth_sensitivity:float",
             file_creation_done = CreateFilterSetFiles.done,
-            last_modified_timestamp = fq_trances_destination_table_datetime.last_modified_timestamp,
+            last_modified_timestamp = trances_destination_table_datetime.last_modified_timestamp,
             service_account_json = service_account_json,
             query_project = query_project
     }
 
-    call GetBQTableLastModifiedDatetime as fq_filter_sites_destination_table_datetime {
+    call GetBQTableLastModifiedDatetime as filter_sites_destination_table_datetime {
         input:
             query_project = query_project,
             fq_table = fq_filter_sites_destination_table,
@@ -320,7 +319,7 @@ workflow GvsCreateFilterSet {
             fq_destination_table = fq_filter_sites_destination_table,
             table_schema = "filter_set_name:string,location:integer,filters:string",
             file_creation_done = CreateFilterSetFiles.done,
-            last_modified_timestamp = fq_filter_sites_destination_table_datetime.last_modified_timestamp,
+            last_modified_timestamp = filter_sites_destination_table_datetime.last_modified_timestamp,
             service_account_json = service_account_json,
             query_project = query_project
     }
