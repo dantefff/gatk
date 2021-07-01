@@ -282,6 +282,7 @@ workflow GvsCreateFilterSet {
             gcs_path_to_input_file = fq_gcs_path_to_info_file,
             fq_destination_table = fq_info_destination_table,
             table_schema = "filter_set_name:string,type:string,location:integer,ref:string,alt:string,vqslod:float,culprit:string,training_label:string,yng_status:string",
+            file_delimiter = "tab",
             file_creation_done = CreateFilterSetFiles.done,
             last_modified_timestamp = InfoTableLastModifiedCheck.last_modified_timestamp,
             service_account_json = service_account_json,
@@ -300,6 +301,7 @@ workflow GvsCreateFilterSet {
             gcs_path_to_input_file = fq_gcs_path_to_tranches_file,
             fq_destination_table = fq_tranches_destination_table,
             table_schema = "filter_set_name:string,target_truth_sensitivity:float,num_known:integer,num_novel:integer,known_ti_tv:float,novel_ti_tv:float,min_vqslod:float,filter_name:string,model:string,accessible_truth_sites:integer,calls_at_truth_sites:integer,truth_sensitivity:float",
+            file_delimiter = ",",
             file_creation_done = CreateFilterSetFiles.done,
             last_modified_timestamp = TranchesTableLastModifiedCheck.last_modified_timestamp,
             service_account_json = service_account_json,
@@ -318,6 +320,7 @@ workflow GvsCreateFilterSet {
             gcs_path_to_input_file = fq_gcs_path_to_filter_sites_file,
             fq_destination_table = fq_filter_sites_destination_table,
             table_schema = "filter_set_name:string,location:integer,filters:string",
+            file_delimiter = "tab",
             file_creation_done = CreateFilterSetFiles.done,
             last_modified_timestamp = FilterSitesTableLastModifiedCheck.last_modified_timestamp,
             service_account_json = service_account_json,
@@ -622,6 +625,7 @@ task UploadGCSFileToBQ {
         String gcs_path_to_input_file
         String fq_destination_table
         String table_schema
+        String file_delimiter
 
         String last_modified_timestamp
         String file_creation_done
@@ -647,10 +651,12 @@ task UploadGCSFileToBQ {
         bq_table=$(echo ~{fq_destination_table} | sed s/\\./:/)
 
         echo "Loading ~{gcs_path_to_input_file} into ~{fq_destination_table}"
-        bq load --project_id=~{query_project} --skip_leading_rows 0 -F "tab" \
-        ${bq_table} \
-        ~{gcs_path_to_input_file} \
-        ~{table_schema} > status_bq_load_table
+        echo 'bq load --project_id=~{query_project} --skip_leading_rows 0 -F "~{file_delimiter}" --schema "~{table_schema}" ~{fq_destination_table} ~{gcs_path_to_input_file}'
+
+        bq load --project_id=~{query_project} --skip_leading_rows 0 -F "~{file_delimiter}" \
+        --schema "~{table_schema}" \
+        ~{fq_destination_table} \
+        ~{gcs_path_to_input_file} > status_bq_load_table
     >>>
 
     # ------------------------------------------------
