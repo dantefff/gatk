@@ -83,9 +83,9 @@ workflow GvsCreateFilterSet {
     String fq_info_destination_table = "~{data_project}.~{default_dataset}.filter_set_info"
     String fq_tranches_destination_table = "~{data_project}.~{default_dataset}.filter_set_tranches"
     String fq_filter_sites_destination_table = "~{data_project}.~{default_dataset}.filter_set_sites"
-    String fq_gcs_path_to_info_file = "~{output_directory}/~{filter_set_name}.filter_sites_load.tsv"
+    String fq_gcs_path_to_info_file = "~{output_directory}/~{filter_set_name}.filter_set_load.tsv"
     String fq_gcs_path_to_tranches_file = "~{output_directory}/~{filter_set_name}.tranches_load.csv"
-    String fq_gcs_path_to_filter_sites_file = "~{output_directory}/~{filter_set_name}.filter_set_load.tsv"
+    String fq_gcs_path_to_filter_sites_file = "~{output_directory}/~{filter_set_name}.filter_sites_load.tsv"
 
     call GetBQTableLastModifiedDatetime as SamplesTableDatetimeCheck {
         input:
