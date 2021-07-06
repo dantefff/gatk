@@ -13,6 +13,8 @@ import org.broadinstitute.hellbender.tools.spark.utils.HopscotchSet;
 import org.broadinstitute.hellbender.tools.spark.utils.HopscotchUniqueMultiMap;
 import org.broadinstitute.hellbender.tools.spark.utils.IntHistogram;
 import org.broadinstitute.hellbender.utils.IntHistogramTest;
+import org.broadinstitute.hellbender.utils.SVInterval;
+import org.broadinstitute.hellbender.utils.SVIntervalTree;
 import org.broadinstitute.hellbender.utils.read.GATKRead;
 import org.broadinstitute.hellbender.GATKBaseTest;
 import org.testng.Assert;

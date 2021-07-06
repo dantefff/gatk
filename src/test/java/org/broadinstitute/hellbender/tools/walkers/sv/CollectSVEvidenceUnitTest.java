@@ -5,7 +5,7 @@ import htsjdk.samtools.SAMSequenceDictionary;
 import org.broadinstitute.hellbender.GATKBaseTest;
 import org.broadinstitute.hellbender.engine.GATKPath;
 import org.broadinstitute.hellbender.tools.sv.SplitReadEvidence;
-import org.broadinstitute.hellbender.tools.walkers.sv.PairedEndAndSplitReadEvidenceCollection.*;
+import org.broadinstitute.hellbender.tools.walkers.sv.CollectSVEvidence.*;
 import org.broadinstitute.hellbender.utils.codecs.SplitReadEvidenceCodec;
 import org.broadinstitute.hellbender.utils.io.FeatureOutputStream;
 import org.broadinstitute.hellbender.utils.read.ArtificialReadUtils;
@@ -20,7 +20,7 @@ import java.util.PriorityQueue;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-public class PairedEndAndSplitReadEvidenceCollectionUnitTest extends GATKBaseTest {
+public class CollectSVEvidenceUnitTest extends GATKBaseTest {
 
     @Test
     public void testGetReportableDiscordantReadPair() {
@@ -46,7 +46,7 @@ public class PairedEndAndSplitReadEvidenceCollectionUnitTest extends GATKBaseTes
 
         final HashSet<String> observedDiscordantNamesAtThisLocus = new HashSet<>();
 
-        final PairedEndAndSplitReadEvidenceCollection tool = new PairedEndAndSplitReadEvidenceCollection();
+        final CollectSVEvidence tool = new CollectSVEvidence();
 
         DiscordantRead reportableDiscordantReadPair =
                 tool.getReportableDiscordantReadPair(discRPDiffContigsFirst, observedDiscordantNamesAtThisLocus, header.getSequenceDictionary());
@@ -101,7 +101,7 @@ public class PairedEndAndSplitReadEvidenceCollectionUnitTest extends GATKBaseTes
 
         final SplitReadFeatureOutputStream mockSrWriter = Mockito.mock(SplitReadFeatureOutputStream.class);
 
-        PairedEndAndSplitReadEvidenceCollection tool = new PairedEndAndSplitReadEvidenceCollection();
+        CollectSVEvidence tool = new CollectSVEvidence();
         final PriorityQueue<SplitPos> splitCounts = new PriorityQueue<>(new SplitPosComparator());
         tool.sampleName = "sample";
 

@@ -16,8 +16,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Prints SV evidence records. Can be used with -L to retrieve records on a set of intervals. Supports streaming input
- * from GCS buckets.
+ * Prints SV evidence records. Can be used with -L to retrieve records on a set of intervals.
+ * Supports streaming input from GCS buckets.
  *
  * <h3>Inputs</h3>
  *
@@ -26,7 +26,10 @@ import java.util.List;
  *         Coordinate-sorted and indexed evidence file URI
  *     </li>
  *     <li>
- *         Reference sequence dictionary
+ *         Sequence dictionary (or reference) if the input file is tab-delimited text
+ *     </li>
+ *     <li>
+ *         Sample name(s) if the input file is tab-delimited text other than read depth
  *     </li>
  * </ul>
  *
@@ -34,7 +37,8 @@ import java.util.List;
  *
  * <ul>
  *     <li>
- *         Coordinate-sorted evidence file, automatically indexed if ending with ".gz"
+ *         Coordinate-sorted evidence file with a name that matches the input file evidence type,
+ *         automatically indexed if ending with ".gz" or ".bci"
  *     </li>
  * </ul>
  *
@@ -139,9 +143,10 @@ public final class PrintSVEvidence <F extends Feature> extends FeatureWalker<F> 
         final FeatureOutputCodec<?, ?> outputCodec = findOutputCodec(outputFilePath);
         final Class<?> outputClass = outputCodec.getFeatureType();
         if ( !evidenceClass.equals(outputClass) ) {
-            throw new UserException("the input file contains " + evidenceClass.getSimpleName() +
+            throw new UserException("The input file contains " + evidenceClass.getSimpleName() +
                     " features, but the output file would be expected to contain " +
-                    outputClass.getSimpleName() + " features");
+                    outputClass.getSimpleName() + " features.  Please choose an output file name " +
+                    "appropriate for the evidence type.");
         }
         final SAMSequenceDictionary dict;
         final List<String> samples;

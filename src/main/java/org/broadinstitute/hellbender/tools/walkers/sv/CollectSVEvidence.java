@@ -30,10 +30,10 @@ import static org.broadinstitute.hellbender.utils.read.ReadUtils.isBaseInsideAda
 
 /**
  * Creates discordant read pair and split read evidence files for use in the GATK-SV pipeline.
- *
  * This tool emulates the functionality of the "svtk collect-pesr" used in v1 of the GATK-SV pipeline.
- * The first output file is a tab-delimited file containing information on discordant read pairs in the
- * input cram, with the following columns:
+ *
+ * The first output file, which should be named "*.pe.txt" or "*.pe.txt.gz" is a tab-delimited file
+ * containing information on discordant read pairs in the input cram, with the following columns:
  *
  * <ul>
  *     <li>read contig</li>
@@ -48,8 +48,8 @@ import static org.broadinstitute.hellbender.utils.read.ReadUtils.isBaseInsideAda
  * Only one record is emitted for each discordant read pair, at the read in the pair with the "upstream" start
  * position according to the sequence dictionary contig ordering and coordinate.
  *
- * The second file contains the locations of all split read clippings in the input bam or cram, with the
- * following columns:
+ * The second output file, which should be named "*.sr.txt" or "*.sr.txt.gz" contains the locations
+ * of all split read clippings in the input bam or cram, with the following columns:
  *
  * <ul>
  *     <li>contig</li>
@@ -58,6 +58,25 @@ import static org.broadinstitute.hellbender.utils.read.ReadUtils.isBaseInsideAda
  *     <li>count: the number of reads clipped at this location in this direction</li>
  *     <li>sample name</li>
  * </ul>
+ *
+ * The third output file, which should be named "*.ac.txt" or "*.ac.txt.gz" specifies allele counts:
+ * For each locus specified in an input VCF as a simple SNP, it gives a count of the number of reads
+ * that have the alt allele at that locus, as well as the total number of observations of that locus.
+ * It has the following columns:
+ *
+ * <ul>
+ *     <li>contig</li>
+ *     <li>position</li>
+ *     <li>ref allele</li>
+ *     <li>alt allele</li>
+ *     <li>total observations</li>
+ *     <li>alt observations</li>
+ * </ul>
+ *
+ * Each of these output files may also be written as a block-compressed interval file, rather than
+ * as a tab-delimited text file by specifying an output file name that ends with ".bci" rather than
+ * ".txt".  These files are self-indexing, and contain complete header information including sample
+ * name(s) and a dictionary for the contigs.
  */
 @BetaFeature
 @CommandLineProgramProperties(
@@ -67,7 +86,7 @@ import static org.broadinstitute.hellbender.utils.read.ReadUtils.isBaseInsideAda
         oneLineSummary = "Gathers paired-end and split read evidence files for use in the GATK-SV pipeline.",
         programGroup = StructuralVariantDiscoveryProgramGroup.class
 )
-public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
+public class CollectSVEvidence extends ReadWalker {
 
     public static final String PAIRED_END_FILE_ARGUMENT_SHORT_NAME = "PE";
     public static final String PAIRED_END_FILE_ARGUMENT_LONG_NAME = "pe-file";
@@ -80,10 +99,14 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
     public static final String SAMPLE_NAME_ARGUMENT_LONG_NAME = "sample-name";
     public static final String COMPRESSION_LEVEL_ARGUMENT_LONG_NAME = "compression-level";
 
-    @Argument(shortName = PAIRED_END_FILE_ARGUMENT_SHORT_NAME, fullName = PAIRED_END_FILE_ARGUMENT_LONG_NAME, doc = "Output file for paired end evidence", optional=false)
+    @Argument(shortName = PAIRED_END_FILE_ARGUMENT_SHORT_NAME,
+            fullName = PAIRED_END_FILE_ARGUMENT_LONG_NAME, doc = "Output file for paired end evidence",
+            optional=true)
     public GATKPath peFile;
 
-    @Argument(shortName = SPLIT_READ_FILE_ARGUMENT_SHORT_NAME, fullName = SPLIT_READ_FILE_ARGUMENT_LONG_NAME, doc = "Output file for split read evidence", optional=false)
+    @Argument(shortName = SPLIT_READ_FILE_ARGUMENT_SHORT_NAME,
+            fullName = SPLIT_READ_FILE_ARGUMENT_LONG_NAME, doc = "Output file for split read evidence",
+            optional=true)
     public GATKPath srFile;
 
     @Argument(shortName = ALLELE_COUNT_OUTPUT_ARGUMENT_SHORT_NAME,
@@ -144,6 +167,15 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
             alleleCounter = new AlleleCounter(sequenceDictionary, sampleNames, compressionLevel,
                                                 alleleCountInputFilename, alleleCountOutputFilename,
                                                 minMapQ, minQ);
+        } else if ( alleleCountInputFilename != null ) {
+            throw new UserException("Having specified an allele-count-vcf input, " +
+                    "you must also supply an allele-count-file for output.");
+        } else if ( alleleCountOutputFilename != null ) {
+            throw new UserException("Having specified an allele-count-file for output, " +
+                    "you must also supply an allele-count-vcf as input.");
+        }
+        if ( peWriter == null && srWriter == null && alleleCounter == null ) {
+            throw new UserException("You must supply at least one output file: PE, SR, or AC");
         }
     }
 
@@ -160,11 +192,11 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
         if ( !(read.isPaired() && read.mateIsUnmapped()) &&
                 !read.isSupplementaryAlignment() &&
                 !read.isSecondaryAlignment() ) {
-            if ( isSoftClipped(read) ) {
+            if ( srWriter != null && isSoftClipped(read) ) {
                 countSplitRead(read, splitPosBuffer, srWriter);
             }
 
-            if ( !read.isProperlyPaired() ) {
+            if ( peWriter != null && !read.isProperlyPaired() ) {
                 reportDiscordantReadPair(read);
             }
         }
@@ -175,6 +207,9 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
     }
 
     private FeatureSink<DiscordantPairEvidence> createPEWriter() {
+        if ( peFile == null ) {
+            return null;
+        }
         final String peFilename = peFile.toPath().toString();
         final List<String> sampleNames = Collections.singletonList(sampleName);
         final DiscordantPairEvidenceCodec peCodec = new DiscordantPairEvidenceCodec();
@@ -183,13 +218,17 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
             return peBCICodec.makeSink(peFile, sequenceDictionary, sampleNames, compressionLevel);
         }
         if ( !peCodec.canDecode(peFilename) ) {
-            logger.warn("Writing discordant pair evidence to a file that can't be read as " +
-                    "discordant pair evidence: " + peFilename);
+            throw new UserException("Attempting to write discordant pair evidence to a file that " +
+                    "can't be read as discordant pair evidence: " + peFilename + ".  The file " +
+                    "name should end with \".pe.txt\", \".pe.txt.gz\", or \".pe.bci\".");
         }
         return peCodec.makeSink(peFile, sequenceDictionary, sampleNames, compressionLevel);
     }
 
     private FeatureSink<SplitReadEvidence> createSRWriter() {
+        if ( srFile == null ) {
+            return null;
+        }
         final String srFilename = srFile.toPath().toString();
         final List<String> sampleNames = Collections.singletonList(sampleName);
         final SplitReadEvidenceCodec srCodec = new SplitReadEvidenceCodec();
@@ -198,8 +237,9 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
             return srBCICodec.makeSink(srFile, sequenceDictionary, sampleNames, compressionLevel);
         }
         if ( !srCodec.canDecode(srFilename) ) {
-            logger.warn("Writing split read evidence to a file that can't be read as " +
-                    "split read evidence: " + srFilename);
+            throw new UserException("Attempting to write split read evidence to a file that " +
+                    "can't be read as split read evidence: " + srFilename + ".  The file " +
+                    "name should end with \".sr.txt\", \".sr.txt.gz\", or \".sr.bci\".");
         }
         return srCodec.makeSink(srFile, sequenceDictionary, sampleNames, compressionLevel);
     }
@@ -537,9 +577,9 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
             } else {
                 final LocusDepthCodec codec = new LocusDepthCodec();
                 if ( !codec.canDecode(outputFilename) ) {
-                    LogManager.getLogger(AlleleCounter.class)
-                            .warn("Writing locus depth evidence to a file that can't be read as " +
-                                    "locus depth evidence: " + outputFilename);
+                    throw new UserException("Attempting to write locus depth evidence to a file that " +
+                            "can't be read as locus depth evidence: " + outputFilename + ".  The file " +
+                            "name should end with \".ld.txt\", \".ld.txt.gz\", or \".ld.bci\".");
                 }
                 this.writer = codec.makeSink(outputPath, dict, sampleNames, compressionLevel);
             }
@@ -605,6 +645,8 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
                         if ( cmp > 0 ) {
                             break;
                         }
+                        // don't count base calls that aren't really part of the template
+                        // (if the template is shorter than the read, we can call into adaptor sequence)
                         if ( cmp == 0 && !isBaseInsideAdaptor(read, locusDepth.getStart()) ) {
                             final int callIdx = readIdx + locusDepth.getStart() - opStart;
                             if ( quals[callIdx] < minQ ) {
@@ -650,7 +692,7 @@ public class PairedEndAndSplitReadEvidenceCollection extends ReadWalker {
                 return false;
             }
             VariantContext snp = snpSourceItr.next();
-            while ( !snp.isSNP() ) {
+            while ( !snp.isSNP() || snp.getAlternateAlleles().size() > 1 ) {
                 if ( !snpSourceItr.hasNext() ) {
                     return false;
                 }

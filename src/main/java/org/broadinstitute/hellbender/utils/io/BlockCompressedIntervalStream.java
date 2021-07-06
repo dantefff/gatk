@@ -14,8 +14,8 @@ import org.broadinstitute.hellbender.engine.FeatureInput;
 import org.broadinstitute.hellbender.engine.GATKPath;
 import org.broadinstitute.hellbender.exceptions.GATKException;
 import org.broadinstitute.hellbender.exceptions.UserException;
-import org.broadinstitute.hellbender.tools.spark.sv.utils.SVInterval;
-import org.broadinstitute.hellbender.tools.spark.sv.utils.SVIntervalTree;
+import org.broadinstitute.hellbender.utils.SVInterval;
+import org.broadinstitute.hellbender.utils.SVIntervalTree;
 import org.broadinstitute.hellbender.utils.codecs.FeatureSink;
 import org.broadinstitute.hellbender.utils.codecs.FeaturesHeader;
 
@@ -199,7 +199,7 @@ public class BlockCompressedIntervalStream {
         public int getSampleIndex( final String sampleName ) {
             final Integer sampleIndex = sampleMap.get(sampleName);
             if ( sampleIndex == null ) {
-                throw new UserException("can't find index for sampleName " + sampleName);
+                throw new IllegalArgumentException("can't find index for sampleName " + sampleName);
             }
             return sampleIndex;
         }

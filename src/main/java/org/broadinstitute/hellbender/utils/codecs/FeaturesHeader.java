@@ -1,6 +1,7 @@
 package org.broadinstitute.hellbender.utils.codecs;
 
 import htsjdk.samtools.SAMSequenceDictionary;
+import org.broadinstitute.hellbender.utils.Utils;
 
 import java.util.List;
 
@@ -14,6 +15,8 @@ public class FeaturesHeader {
                            final String version,
                            final SAMSequenceDictionary dictionary,
                            final List<String> sampleNames ) {
+        Utils.nonNull(className);
+        Utils.nonNull(version);
         this.className = className;
         this.version = version;
         this.dictionary = dictionary;
