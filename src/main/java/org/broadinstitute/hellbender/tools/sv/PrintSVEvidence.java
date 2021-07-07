@@ -1,6 +1,7 @@
 package org.broadinstitute.hellbender.tools.sv;
 
 import htsjdk.samtools.SAMSequenceDictionary;
+import htsjdk.samtools.SAMSequenceRecord;
 import htsjdk.tribble.Feature;
 import org.broadinstitute.barclay.argparser.Argument;
 import org.broadinstitute.barclay.argparser.CommandLineProgramProperties;
@@ -41,6 +42,8 @@ import java.util.List;
  *         automatically indexed if ending with ".gz" or ".bci"
  *     </li>
  * </ul>
+ *
+ * If an output file is not specified, the header from the input file will be written to stdout.
  *
  * <h3>Usage example</h3>
  *
@@ -83,7 +86,8 @@ public final class PrintSVEvidence <F extends Feature> extends FeatureWalker<F> 
             doc = "Output file with an evidence extension matching the input. Will be indexed if it has a " +
                     "block-compressed extension (e.g. '.gz' or '.bci').",
             fullName = StandardArgumentDefinitions.OUTPUT_LONG_NAME,
-            shortName = StandardArgumentDefinitions.OUTPUT_SHORT_NAME
+            shortName = StandardArgumentDefinitions.OUTPUT_SHORT_NAME,
+            optional = true
     )
     private GATKPath outputFilePath;
 
@@ -135,7 +139,23 @@ public final class PrintSVEvidence <F extends Feature> extends FeatureWalker<F> 
     @Override
     public void onTraversalStart() {
         super.onTraversalStart();
-        initializeOutput();
+        if ( outputFilePath == null ) {
+            dumpHeader(getHeader());
+        } else {
+            initializeOutput();
+        }
+    }
+
+    private void dumpHeader( final FeaturesHeader header ) {
+        System.out.println("Dictionary:");
+        for ( final SAMSequenceRecord rec : header.getDictionary().getSequences() ) {
+            System.out.println(rec.getSAMString());
+        }
+        System.out.println();
+        System.out.println("Samples:");
+        for ( final String sampleName : header.getSampleNames() ) {
+            System.out.println(sampleName);
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -148,6 +168,24 @@ public final class PrintSVEvidence <F extends Feature> extends FeatureWalker<F> 
                     outputClass.getSimpleName() + " features.  Please choose an output file name " +
                     "appropriate for the evidence type.");
         }
+        final FeaturesHeader header = getHeader();
+        outputSink = (FeatureSink<F>)outputCodec.makeSink(outputFilePath,
+                                                            header.getDictionary(),
+                                                            header.getSampleNames(),
+                                                            compressionLevel);
+    }
+
+    private static FeatureOutputCodec<?, ?> findOutputCodec( final GATKPath outputFilePath ) {
+        final String outputFileName = outputFilePath.toString();
+        for ( final FeatureOutputCodec<?, ?> codec : outputCodecs ) {
+            if ( codec.canDecode(outputFileName) ) {
+                return codec;
+            }
+        }
+        throw new UserException("no codec found for path " + outputFileName);
+    }
+
+    private FeaturesHeader getHeader() {
         final SAMSequenceDictionary dict;
         final List<String> samples;
         final Object headerObj = getDrivingFeaturesHeader();
@@ -161,17 +199,7 @@ public final class PrintSVEvidence <F extends Feature> extends FeatureWalker<F> 
             dict = getBestAvailableSequenceDictionary();
             samples = sampleNames;
         }
-        outputSink = (FeatureSink<F>)outputCodec.makeSink(outputFilePath, dict, samples, compressionLevel);
-    }
-
-    private static FeatureOutputCodec<?, ?> findOutputCodec( final GATKPath outputFilePath ) {
-        final String outputFileName = outputFilePath.toString();
-        for ( final FeatureOutputCodec<?, ?> codec : outputCodecs ) {
-            if ( codec.canDecode(outputFileName) ) {
-                return codec;
-            }
-        }
-        throw new UserException("no codec found for path " + outputFileName);
+        return new FeaturesHeader(evidenceClass.getSimpleName(), "?", dict, samples);
     }
 
     @Override
@@ -179,13 +207,17 @@ public final class PrintSVEvidence <F extends Feature> extends FeatureWalker<F> 
                       final ReadsContext readsContext,
                       final ReferenceContext referenceContext,
                       final FeatureContext featureContext) {
-        outputSink.write(feature);
+        if ( outputSink != null ) {
+            outputSink.write(feature);
+        }
     }
 
     @Override
     public Object onTraversalSuccess() {
         super.onTraversalSuccess();
-        outputSink.close();
+        if ( outputSink != null ) {
+            outputSink.close();
+        }
         return null;
     }
 }

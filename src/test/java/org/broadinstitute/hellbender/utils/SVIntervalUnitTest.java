@@ -1,4 +1,4 @@
-package org.broadinstitute.hellbender.tools.spark.sv.utils;
+package org.broadinstitute.hellbender.utils;
 
 import org.broadinstitute.hellbender.GATKBaseTest;
 import org.broadinstitute.hellbender.utils.SVInterval;

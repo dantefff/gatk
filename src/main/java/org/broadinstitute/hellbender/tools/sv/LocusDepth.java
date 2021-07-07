@@ -14,42 +14,45 @@ import java.io.IOException;
 public final class LocusDepth implements Feature {
     private final String contig;
     private final int position;
-    private final int refIdx; // index into nucleotideValues
-    private final int altIdx; // index into nucleotideValues
-    private int totalDepth;
-    private int altDepth;
+    private final byte refCall; // index into nucleotideValues
+    private int[] depths;
     public final static String BCI_VERSION = "1.0";
 
     // our own private copy so that we don't make repeated array allocations
     private final static Nucleotide[] nucleotideValues = Nucleotide.values();
 
-    public LocusDepth( final Locatable loc, final int refIdx, final int altIdx ) {
-        this(loc.getContig(), loc.getStart(), refIdx, altIdx, 0, 0);
+    public LocusDepth( final Locatable loc, final byte refCall ) {
+        this.contig = loc.getContig();
+        this.position = loc.getStart();
+        this.refCall = refCall;
+        this.depths = new int[4];
     }
 
-    public LocusDepth( final String contig, final int position,
-                       final int refIdx, final int altIdx,
-                       final int totalDepth, final int altDepth ) {
+    public LocusDepth( final String contig, final int position, final byte refCall,
+                       final int aDepth, final int cDepth, final int gDepth, final int tDepth ) {
         this.contig = contig;
         this.position = position;
-        this.refIdx = refIdx;
-        this.altIdx = altIdx;
-        this.totalDepth = totalDepth;
-        this.altDepth = altDepth;
+        this.refCall = refCall;
+        this.depths = new int[4];
+        depths[0] = aDepth;
+        depths[1] = cDepth;
+        depths[2] = gDepth;
+        depths[3] = tDepth;
     }
 
     public LocusDepth( final DataInputStream dis, final SAMSequenceDictionary dict ) throws IOException {
         contig = dict.getSequence(dis.readInt()).getSequenceName();
         position = dis.readInt();
-        refIdx = dis.readByte();
-        altIdx = dis.readByte();
-        totalDepth = dis.readInt();
-        altDepth = dis.readInt();
+        refCall = dis.readByte();
+        depths = new int[4];
+        depths[0] = dis.readInt();
+        depths[1] = dis.readInt();
+        depths[2] = dis.readInt();
+        depths[3] = dis.readInt();
     }
 
     public void observe( final int idx ) {
-        if ( idx == altIdx ) altDepth += 1;
-        totalDepth += 1;
+        depths[idx] += 1;
     }
 
     @Override
@@ -68,33 +71,27 @@ public final class LocusDepth implements Feature {
     }
 
     public char getRefCall() {
-        return nucleotideValues[refIdx].encodeAsChar();
+        return (char)refCall;
     }
 
-    public char getAltCall() {
-        return nucleotideValues[altIdx].encodeAsChar();
-    }
-
-    public int getAltDepth() {
-        return altDepth;
-    }
-
-    public int getTotalDepth() {
-        return totalDepth;
-    }
+    public int getADepth() { return depths[0]; }
+    public int getCDepth() { return depths[1]; }
+    public int getGDepth() { return depths[2]; }
+    public int getTDepth() { return depths[3]; }
 
     public void write( final DataOutputStream dos,
                        final SAMSequenceDictionary dict ) throws IOException {
         dos.writeInt(dict.getSequenceIndex(contig));
         dos.writeInt(position);
-        dos.writeByte(refIdx);
-        dos.writeByte(altIdx);
-        dos.writeInt(totalDepth);
-        dos.writeInt(altDepth);
+        dos.writeByte(refCall);
+        dos.writeInt(depths[0]);
+        dos.writeInt(depths[1]);
+        dos.writeInt(depths[2]);
+        dos.writeInt(depths[3]);
     }
 
     public String toString() {
-        return getContig() + "\t" + getStart() + "\t" + nucleotideValues[refIdx] + "\t" +
-                nucleotideValues[altIdx] + "\t" + totalDepth + "\t" + altDepth;
+        return contig + "\t" + position + "\t" + (char)refCall + "\t" +
+                depths[0] + "\t" + depths[1] + "\t" + depths[2] + "\t" + depths[3];
     }
 }

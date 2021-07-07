@@ -8,7 +8,6 @@ import htsjdk.tribble.index.tabix.TabixFormat;
 import htsjdk.tribble.readers.LineIterator;
 import org.broadinstitute.hellbender.engine.GATKPath;
 import org.broadinstitute.hellbender.tools.sv.LocusDepth;
-import org.broadinstitute.hellbender.utils.Nucleotide;
 import org.broadinstitute.hellbender.utils.io.FeatureOutputStream;
 
 import java.util.List;
@@ -28,15 +27,16 @@ public class LocusDepthCodec extends AsciiFeatureCodec<LocusDepth>
 
     @Override public LocusDepth decode( final String line ) {
         final List<String> tokens = splitter.splitToList(line);
-        if ( tokens.size() != 6 ) {
+        if ( tokens.size() != 7 ) {
             throw new IllegalArgumentException("Invalid number of columns: " + tokens.size());
         }
         return new LocusDepth(tokens.get(0),
                 Integer.parseUnsignedInt(tokens.get(1)) + 1,
-                Nucleotide.decode(tokens.get(2)).ordinal(),
-                Nucleotide.decode(tokens.get(3)).ordinal(),
+                (byte)tokens.get(2).charAt(0),
+                Integer.parseUnsignedInt(tokens.get(3)),
                 Integer.parseUnsignedInt(tokens.get(4)),
-                Integer.parseUnsignedInt(tokens.get(5)));
+                Integer.parseUnsignedInt(tokens.get(5)),
+                Integer.parseUnsignedInt(tokens.get(6)));
     }
 
     @Override public Object readActualHeader( LineIterator reader ) { return null; }
@@ -69,7 +69,8 @@ public class LocusDepthCodec extends AsciiFeatureCodec<LocusDepth>
 
     public static String encode( final LocusDepth locusDepth ) {
         return locusDepth.getContig() + "\t" + (locusDepth.getStart() - 1) + "\t" +
-                locusDepth.getRefCall() + "\t" + locusDepth.getAltCall() + "\t" +
-                locusDepth.getTotalDepth() + "\t" + locusDepth.getAltDepth();
+                locusDepth.getRefCall() + "\t" + locusDepth.getADepth() + "\t" +
+                locusDepth.getCDepth() + "\t" + locusDepth.getGDepth() + "\t" +
+                locusDepth.getTDepth();
     }
 }

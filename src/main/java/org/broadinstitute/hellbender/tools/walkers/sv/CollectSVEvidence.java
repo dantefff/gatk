@@ -692,25 +692,14 @@ public class CollectSVEvidence extends ReadWalker {
                 return false;
             }
             VariantContext snp = snpSourceItr.next();
-            while ( !snp.isSNP() || snp.getAlternateAlleles().size() > 1 ) {
+            while ( !snp.isSNP() ) {
                 if ( !snpSourceItr.hasNext() ) {
                     return false;
                 }
                 snp = snpSourceItr.next();
             }
             final byte[] refSeq = snp.getReference().getBases();
-            final Nucleotide refCall = Nucleotide.decode(refSeq[0]);
-            if ( !refCall.isStandard() ) {
-                throw new UserException("vcf contains a SNP with a non-standard reference base " +
-                        refCall + " at locus " + snp.getContig() + ":" + snp.getStart());
-            }
-            final byte[] altSeq = snp.getAlternateAllele(0).getBases();
-            final Nucleotide altCall = Nucleotide.decode(altSeq[0]);
-            if ( !altCall.isStandard() ) {
-                throw new UserException("vcf contains a SNP with a non-standard alt base" +
-                        altCall + " at locus " + snp.getContig() + ":" + snp.getStart());
-            }
-            final LocusDepth locusDepth = new LocusDepth(snp, refCall.ordinal(), altCall.ordinal());
+            final LocusDepth locusDepth = new LocusDepth(snp, refSeq[0]);
             locusDepthQueue.add(locusDepth);
             return true;
         }
